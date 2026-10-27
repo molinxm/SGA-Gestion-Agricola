@@ -1,0 +1,271 @@
+{% extends "base.html" %}
+
+{% block titulo %}Operarios{% endblock %}
+{% block titulo_pagina %}Gestión de operarios{% endblock %}
+{% block subtitulo_pagina %}Administra el personal de campo, sus cargos y su estado laboral.{% endblock %}
+
+{% block contenido %}
+
+<!-- ==================== Indicadores ==================== -->
+<section class="stat-grid">
+    <article class="stat-card stat-card--total">
+        <div class="stat-card__icono"><i class="fa-solid fa-users"></i></div>
+        <div>
+            <div class="stat-card__valor">{{ resumen.total }}</div>
+            <div class="stat-card__label">Operarios</div>
+        </div>
+    </article>
+
+    <article class="stat-card stat-card--completada">
+        <div class="stat-card__icono"><i class="fa-solid fa-user-check"></i></div>
+        <div>
+            <div class="stat-card__valor">{{ resumen.activos }}</div>
+            <div class="stat-card__label">Activos</div>
+        </div>
+    </article>
+
+    <article class="stat-card stat-card--incompleta">
+        <div class="stat-card__icono"><i class="fa-solid fa-user-slash"></i></div>
+        <div>
+            <div class="stat-card__valor">{{ resumen.inactivos }}</div>
+            <div class="stat-card__label">Inactivos</div>
+        </div>
+    </article>
+
+    <article class="stat-card stat-card--proceso">
+        <div class="stat-card__icono"><i class="fa-solid fa-circle-check"></i></div>
+        <div>
+            <div class="stat-card__valor">{{ resumen.tareas_completadas }}</div>
+            <div class="stat-card__label">Tareas cumplidas</div>
+        </div>
+    </article>
+</section>
+
+<!-- ==================== Listado ==================== -->
+<section class="card">
+    <div class="toolbar">
+        <form class="toolbar__filtros" method="GET" action="{{ url_for('operarios') }}" data-autofiltro>
+            <span class="buscar">
+                <i class="fa-solid fa-magnifying-glass"></i>
+                <input class="form-control" type="search" name="q" value="{{ filtros.q }}"
+                       placeholder="Buscar por nombre, documento o correo…">
+            </span>
+
+            <select class="form-select" name="estado" aria-label="Filtrar por estado">
+                <option value="">Todo el personal</option>
+                {% for estado in ESTADOS_OPERARIO %}
+                <option value="{{ estado }}" {{ 'selected' if filtros.estado == estado }}>{{ estado }}</option>
+                {% endfor %}
+            </select>
+
+            <select class="form-select" name="cargo" aria-label="Filtrar por cargo">
+                <option value="">Todos los cargos</option>
+                {% for cargo in CARGOS %}
+                <option value="{{ cargo }}" {{ 'selected' if filtros.cargo == cargo }}>{{ cargo }}</option>
+                {% endfor %}
+            </select>
+
+            <button class="btn btn--secondary btn--sm" type="submit">
+                <i class="fa-solid fa-filter"></i> Aplicar
+            </button>
+            {% if filtros.q or filtros.estado or filtros.cargo %}
+            <a class="btn btn--ghost btn--sm" href="{{ url_for('operarios') }}">
+                <i class="fa-solid fa-eraser"></i> Limpiar
+            </a>
+            {% endif %}
+        </form>
+
+        <button class="btn btn--primary" type="button" data-operario-nuevo>
+            <i class="fa-solid fa-user-plus"></i> Nuevo operario
+        </button>
+    </div>
+
+    {% if operarios %}
+    <div class="tabla-scroll">
+        <table class="tabla">
+            <thead>
+                <tr>
+                    <th>Operario</th>
+                    <th>Contacto</th>
+                    <th>Cargo</th>
+                    <th>Estado</th>
+                    <th>Ingreso</th>
+                    <th class="centro">Tareas</th>
+                    <th class="centro">Acciones</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for operario in operarios %}
+                <tr>
+                    <td>
+                        <div class="persona">
+                            <span class="avatar">{{ operario.nombre|iniciales }}</span>
+                            <div>
+                                <span class="celda-titulo">{{ operario.nombre }}</span>
+                                <span class="celda-sub">
+                                    <i class="fa-solid fa-id-card"></i> {{ operario.documento }}
+                                </span>
+                            </div>
+                        </div>
+                    </td>
+                    <td>
+                        <span class="celda-sub">
+                            <i class="fa-solid fa-phone"></i> {{ operario.telefono or 'Sin teléfono' }}
+                        </span>
+                        <span class="celda-sub">
+                            <i class="fa-solid fa-envelope"></i> {{ operario.email or 'Sin correo' }}
+                        </span>
+                    </td>
+                    <td>{{ operario.cargo }}</td>
+                    <td>
+                        <span class="badge {{ 'badge--activo' if operario.estado == 'Activo' else 'badge--inactivo' }}">
+                            {{ operario.estado }}
+                        </span>
+                    </td>
+                    <td class="num">{{ operario.fecha_ingreso|fecha_es }}</td>
+                    <td class="centro num">
+                        <span class="celda-titulo">{{ operario.tareas_completadas|int }} / {{ operario.tareas_asignadas|int }}</span>
+                        <span class="celda-sub">completadas</span>
+                    </td>
+                    <td>
+                        <div class="fila-acciones">
+                            <button class="accion" type="button" title="Editar operario"
+                                    data-operario-editar='{{ {
+                                        "accion": url_for("editar_operario", operario_id=operario.id),
+                                        "nombre": operario.nombre,
+                                        "documento": operario.documento,
+                                        "telefono": operario.telefono or "",
+                                        "email": operario.email or "",
+                                        "cargo": operario.cargo,
+                                        "estado": operario.estado,
+                                        "fecha_ingreso": operario.fecha_ingreso.isoformat() if operario.fecha_ingreso else "",
+                                        "observaciones": operario.observaciones or ""
+                                    } | tojson }}'>
+                                <i class="fa-solid fa-pen"></i>
+                            </button>
+
+                            {% if current_user.rol == 'admin' %}
+                            <form method="POST"
+                                  action="{{ url_for('eliminar_operario', operario_id=operario.id) }}"
+                                  data-confirmar="¿Eliminar a {{ operario.nombre }}? Sus tareas quedarán sin asignar.">
+                                <button class="accion accion--peligro" type="submit" title="Eliminar operario">
+                                    <i class="fa-solid fa-trash"></i>
+                                </button>
+                            </form>
+                            {% endif %}
+                        </div>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div class="estado-vacio">
+        <div class="estado-vacio__icono"><i class="fa-solid fa-users-slash"></i></div>
+        <h3>No hay operarios para mostrar</h3>
+        <p>
+            {% if filtros.q or filtros.estado or filtros.cargo %}
+                No se encontraron resultados con los filtros aplicados. Prueba con otros criterios.
+            {% else %}
+                Aún no has registrado personal de campo. Comienza creando el primer operario.
+            {% endif %}
+        </p>
+        <button class="btn btn--primary" type="button" data-operario-nuevo>
+            <i class="fa-solid fa-user-plus"></i> Registrar operario
+        </button>
+    </div>
+    {% endif %}
+
+    {% if operarios %}
+    <div class="card__footer">
+        <span class="form-hint">
+            Mostrando <strong>{{ total_filtrado }}</strong>
+            {{ 'operario' if total_filtrado == 1 else 'operarios' }} de un total de {{ resumen.total }}.
+        </span>
+    </div>
+    {% endif %}
+</section>
+
+<!-- ==================== Modal crear / editar operario ==================== -->
+<div class="modal" id="modalOperario" role="dialog" aria-modal="true" aria-labelledby="tituloModalOperario">
+    <div class="modal__dialogo">
+        <div class="modal__cabecera">
+            <h3 id="tituloModalOperario"><i class="fa-solid fa-user-plus"></i> Nuevo operario</h3>
+            <button class="modal__cerrar" type="button" data-modal-cerrar aria-label="Cerrar">
+                <i class="fa-solid fa-xmark"></i>
+            </button>
+        </div>
+
+        <form id="formOperario" method="POST" action="{{ url_for('crear_operario') }}"
+              data-accion-crear="{{ url_for('crear_operario') }}">
+            <div class="modal__cuerpo">
+                <div class="form-grid">
+                    <div class="form-group form-group--full">
+                        <label class="form-label" for="op-nombre">Nombre completo <span class="req">*</span></label>
+                        <input class="form-control" type="text" id="op-nombre" name="nombre"
+                               placeholder="Ej. Carlos Mendoza Rivas" maxlength="120" required>
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label" for="op-documento">Documento <span class="req">*</span></label>
+                        <input class="form-control" type="text" id="op-documento" name="documento"
+                               placeholder="Ej. 1010234567" maxlength="30" required>
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label" for="op-telefono">Teléfono</label>
+                        <input class="form-control" type="tel" id="op-telefono" name="telefono"
+                               placeholder="Ej. 3105550101" maxlength="30">
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label" for="op-email">Correo electrónico</label>
+                        <input class="form-control" type="email" id="op-email" name="email"
+                               placeholder="operario@correo.com" maxlength="150">
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label" for="op-cargo">Cargo</label>
+                        <select class="form-select" id="op-cargo" name="cargo">
+                            {% for cargo in CARGOS %}
+                            <option value="{{ cargo }}">{{ cargo }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label" for="op-estado">Estado</label>
+                        <select class="form-select" id="op-estado" name="estado">
+                            {% for estado in ESTADOS_OPERARIO %}
+                            <option value="{{ estado }}">{{ estado }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label" for="op-fecha">Fecha de ingreso</label>
+                        <input class="form-control" type="date" id="op-fecha" name="fecha_ingreso">
+                    </div>
+
+                    <div class="form-group form-group--full">
+                        <label class="form-label" for="op-observaciones">Observaciones</label>
+                        <textarea class="form-textarea" id="op-observaciones" name="observaciones"
+                                  maxlength="255" placeholder="Certificaciones, licencias, notas de desempeño…"></textarea>
+                    </div>
+                </div>
+            </div>
+
+            <div class="modal__pie">
+                <button class="btn btn--secondary" type="button" data-modal-cerrar>
+                    <i class="fa-solid fa-xmark"></i> Cancelar
+                </button>
+                <button class="btn btn--primary" type="submit">
+                    <i class="fa-solid fa-floppy-disk"></i> Guardar operario
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+{% endblock %}

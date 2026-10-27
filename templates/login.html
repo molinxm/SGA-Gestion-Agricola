@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Acceso al Sistema de Gestión Agrícola (SGA) · UNIMINUTO">
+    <meta name="theme-color" content="#1e5631">
+    <title>Ingreso al sistema · SGA</title>
+
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='88'>🌱</text></svg>">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+<div class="autenticacion">
+
+    <!-- ============ Lateral ilustrado ============ -->
+    <section class="autenticacion__lateral">
+        <img src="https://coresg-normal.trae.ai/api/ide/v1/text_to_image?prompt=close-up%20of%20farmer%20hands%20holding%20young%20green%20seedlings%20over%20rich%20dark%20soil%2C%20warm%20morning%20sunlight%2C%20sustainable%20agriculture%2C%20cinematic%20photography&image_size=portrait_4_3"
+             alt="Manos de agricultor sosteniendo plántulas sobre tierra fértil">
+        <div class="autenticacion__velo"></div>
+
+        <div class="logo-publico">
+            <div class="marca-logo"><i class="fa-solid fa-seedling"></i></div>
+            <div>
+                <strong>Sistema de Gestión Agrícola</strong>
+                <span>UNIMINUTO · Ingeniería de Software</span>
+            </div>
+        </div>
+
+        <div>
+            <h2>Del surco al reporte, todo bajo control.</h2>
+            <p>
+                Administra operarios, asigna labores por lote y cultivo, y mide el cumplimiento
+                del campo desde un solo panel claro y accesible.
+            </p>
+
+            <div class="autenticacion__datos">
+                <div>
+                    <strong>4</strong>
+                    <span>Estados de tarea</span>
+                </div>
+                <div>
+                    <strong>3</strong>
+                    <span>Roles de acceso</span>
+                </div>
+                <div>
+                    <strong>CSV</strong>
+                    <span>Exportación</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="creditos-uniminuto">
+            <i class="fa-solid fa-graduation-cap"></i>
+            <div>
+                <strong>Corporación Universitaria Minuto de Dios</strong>
+                <span>Proyecto académico de desarrollo web · 2026</span>
+            </div>
+        </div>
+    </section>
+
+    <!-- ============ Formulario ============ -->
+    <section class="autenticacion__panel">
+        <div class="caja-acceso">
+
+            <div class="caja-acceso__icono"><i class="fa-solid fa-wheat-awn"></i></div>
+            <h1>Iniciar sesión</h1>
+            <p class="caja-acceso__sub">Ingresa con tu cuenta institucional para administrar la operación agrícola.</p>
+
+            {% with mensajes = get_flashed_messages(with_categories=true) %}
+                {% if mensajes %}
+                <div class="flash-stack">
+                    {% for categoria, mensaje in mensajes %}
+                    {% set iconos = {
+                        'success': 'fa-circle-check',
+                        'error': 'fa-circle-exclamation',
+                        'warning': 'fa-triangle-exclamation',
+                        'info': 'fa-circle-info'
+                    } %}
+                    <div class="alerta alerta--{{ categoria if categoria in iconos else 'info' }}" role="alert">
+                        <i class="fa-solid {{ iconos.get(categoria, 'fa-circle-info') }}"></i>
+                        <span class="alerta__texto">{{ mensaje }}</span>
+                        <button class="alerta__cerrar" type="button" aria-label="Cerrar aviso">
+                            <i class="fa-solid fa-xmark"></i>
+                        </button>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% endif %}
+            {% endwith %}
+
+            <form method="POST" action="{{ url_for('login') }}" novalidate>
+                <div class="form-group">
+                    <label class="form-label" for="email">Correo institucional</label>
+                    <div class="input-icono">
+                        <i class="fa-solid fa-envelope"></i>
+                        <input class="form-control" type="email" id="email" name="email"
+                               value="{{ email or '' }}" placeholder="usuario@sga.edu.co"
+                               autocomplete="username" required>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label" for="password">Contraseña</label>
+                    <div class="input-icono">
+                        <i class="fa-solid fa-lock"></i>
+                        <input class="form-control" type="password" id="password" name="password"
+                               placeholder="••••••••" autocomplete="current-password" required>
+                    </div>
+                </div>
+
+                <div class="caja-acceso__extra">
+                    <label class="check-inline">
+                        <input type="checkbox" name="recordar"> Mantener sesión activa
+                    </label>
+                    <a href="{{ url_for('index') }}#modulos">¿Necesitas ayuda?</a>
+                </div>
+
+                <button class="btn btn--primary btn--block" type="submit">
+                    <i class="fa-solid fa-right-to-bracket"></i> Entrar al sistema
+                </button>
+            </form>
+
+            <div class="aviso-acceso">
+                <strong><i class="fa-solid fa-shield-halved"></i> Acceso restringido</strong>
+                <ul>
+                    <li>Tus credenciales son personales: no las compartas ni las publiques.</li>
+                    <li>¿Olvidaste tu contraseña? Solicítala al administrador del sistema.</li>
+                </ul>
+            </div>
+
+            <a class="volver-inicio" href="{{ url_for('index') }}">
+                <i class="fa-solid fa-arrow-left"></i> Volver al sitio público
+            </a>
+        </div>
+    </section>
+</div>
+
+<script src="{{ url_for('static', filename='js/main.js') }}"></script>
+</body>
+</html>

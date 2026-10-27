@@ -1,0 +1,352 @@
+{% extends "base.html" %}
+
+{% block titulo %}Tareas{% endblock %}
+{% block titulo_pagina %}Tareas de campo{% endblock %}
+{% block subtitulo_pagina %}Asigna labores por lote y cultivo, y sigue su avance en tiempo real.{% endblock %}
+
+{% block contenido %}
+
+{% set puede_gestionar = current_user.rol in ('admin', 'supervisor') %}
+
+<!-- ==================== Indicadores por estado ==================== -->
+<section class="stat-grid">
+    <article class="stat-card stat-card--total">
+        <div class="stat-card__icono"><i class="fa-solid fa-list-check"></i></div>
+        <div>
+            <div class="stat-card__valor">{{ total_filtrado }}</div>
+            <div class="stat-card__label">Tareas listadas</div>
+        </div>
+    </article>
+
+    <article class="stat-card stat-card--pendiente">
+        <div class="stat-card__icono"><i class="fa-regular fa-clock"></i></div>
+        <div>
+            <div class="stat-card__valor">{{ conteo['Pendiente'] }}</div>
+            <div class="stat-card__label">Pendientes</div>
+        </div>
+    </article>
+
+    <article class="stat-card stat-card--proceso">
+        <div class="stat-card__icono"><i class="fa-solid fa-tractor"></i></div>
+        <div>
+            <div class="stat-card__valor">{{ conteo['En Proceso'] }}</div>
+            <div class="stat-card__label">En proceso</div>
+        </div>
+    </article>
+
+    <article class="stat-card stat-card--completada">
+        <div class="stat-card__icono"><i class="fa-solid fa-circle-check"></i></div>
+        <div>
+            <div class="stat-card__valor">{{ conteo['Completada'] }}</div>
+            <div class="stat-card__label">Completadas</div>
+        </div>
+    </article>
+
+    <article class="stat-card stat-card--incompleta">
+        <div class="stat-card__icono"><i class="fa-solid fa-circle-exclamation"></i></div>
+        <div>
+            <div class="stat-card__valor">{{ conteo['Incompleta'] }}</div>
+            <div class="stat-card__label">Incompletas</div>
+        </div>
+    </article>
+</section>
+
+<!-- ==================== Listado ==================== -->
+<section class="card">
+    <div class="toolbar">
+        <form class="toolbar__filtros" method="GET" action="{{ url_for('tareas') }}">
+            <span class="buscar">
+                <i class="fa-solid fa-magnifying-glass"></i>
+                <input class="form-control" type="search" name="q" value="{{ filtros.q }}"
+                       placeholder="Buscar por título, lote o cultivo…">
+            </span>
+
+            <select class="form-select" name="prioridad" aria-label="Filtrar por prioridad">
+                <option value="">Toda prioridad</option>
+                {% for prioridad in PRIORIDADES %}
+                <option value="{{ prioridad }}" {{ 'selected' if filtros.prioridad == prioridad }}>{{ prioridad }}</option>
+                {% endfor %}
+            </select>
+
+            {% if puede_gestionar %}
+            <select class="form-select" name="operario_id" aria-label="Filtrar por operario">
+                <option value="">Todo el personal</option>
+                {% for operario in operarios %}
+                <option value="{{ operario.id }}" {{ 'selected' if filtros.operario_id == operario.id|string }}>
+                    {{ operario.nombre }}
+                </option>
+                {% endfor %}
+            </select>
+            {% endif %}
+
+            {% if filtros.estado %}<input type="hidden" name="estado" value="{{ filtros.estado }}">{% endif %}
+
+            <button class="btn btn--secondary btn--sm" type="submit">
+                <i class="fa-solid fa-filter"></i> Filtrar
+            </button>
+
+            {% if filtros.q or filtros.estado or filtros.prioridad or filtros.operario_id %}
+            <a class="btn btn--ghost btn--sm" href="{{ url_for('tareas') }}">
+                <i class="fa-solid fa-eraser"></i> Limpiar
+            </a>
+            {% endif %}
+        </form>
+
+        {% if puede_gestionar %}
+        <button class="btn btn--primary" type="button" data-tarea-nueva>
+            <i class="fa-solid fa-plus"></i> Nueva tarea
+        </button>
+        {% endif %}
+    </div>
+
+    <!-- Píldoras de estado -->
+    <div style="padding:1rem 1.4rem;border-bottom:1px solid var(--linea)">
+        <div class="pills">
+            <a class="pill {{ 'activo' if not filtros.estado }}"
+               href="{{ url_for('tareas', q=filtros.q, prioridad=filtros.prioridad, operario_id=filtros.operario_id) }}">
+                <i class="fa-solid fa-layer-group"></i> Todas
+            </a>
+            {% set iconos_estado = {
+                'Pendiente': 'fa-regular fa-clock',
+                'En Proceso': 'fa-solid fa-tractor',
+                'Completada': 'fa-solid fa-circle-check',
+                'Incompleta': 'fa-solid fa-circle-exclamation'
+            } %}
+            {% for estado in ESTADOS %}
+            <a class="pill {{ 'activo' if filtros.estado == estado }}"
+               href="{{ url_for('tareas', estado=estado, q=filtros.q, prioridad=filtros.prioridad, operario_id=filtros.operario_id) }}">
+                <i class="{{ iconos_estado.get(estado, 'fa-solid fa-tag') }}"></i> {{ estado }}
+            </a>
+            {% endfor %}
+        </div>
+    </div>
+
+    {% if tareas %}
+    <div class="tabla-scroll">
+        <table class="tabla">
+            <thead>
+                <tr>
+                    <th>#</th>
+                    <th>Tarea</th>
+                    <th>Operario asignado</th>
+                    <th>Prioridad</th>
+                    <th>Estado</th>
+                    <th>Fecha límite</th>
+                    {% if puede_gestionar %}<th class="centro">Acciones</th>{% endif %}
+                </tr>
+            </thead>
+            <tbody>
+                {% for tarea in tareas %}
+                <tr class="{{ 'fila-vencida' if tarea.vencida }}">
+                    <td class="num">{{ tarea.id }}</td>
+
+                    <td>
+                        <span class="celda-titulo">{{ tarea.titulo }}</span>
+                        <span class="celda-sub">
+                            {% if tarea.lote %}<i class="fa-solid fa-map-location-dot"></i> {{ tarea.lote }}{% endif %}
+                            {% if tarea.cultivo %}<i class="fa-solid fa-wheat-awn" style="margin-left:.45rem"></i> {{ tarea.cultivo }}{% endif %}
+                            {% if not tarea.lote and not tarea.cultivo %}<i class="fa-solid fa-tag"></i> Sin lote ni cultivo{% endif %}
+                        </span>
+                    </td>
+
+                    <td>
+                        {% if tarea.operario_nombre %}
+                        <div class="persona">
+                            <span class="avatar avatar--sm">{{ tarea.operario_nombre|iniciales }}</span>
+                            <div>
+                                <span class="celda-titulo">{{ tarea.operario_nombre }}</span>
+                                <span class="celda-sub">{{ tarea.operario_cargo or 'Sin cargo' }}</span>
+                            </div>
+                        </div>
+                        {% else %}
+                        <span class="badge badge--neutral">Sin asignar</span>
+                        {% endif %}
+                    </td>
+
+                    <td>
+                        <span class="badge {{ tarea.prioridad|prioridad_class }}">{{ tarea.prioridad }}</span>
+                    </td>
+
+                    <td>
+                        <form method="POST" action="{{ url_for('cambiar_estado_tarea', tarea_id=tarea.id) }}">
+                            <input type="hidden" name="volver_a"
+                                   value="{{ url_for('tareas', estado=filtros.estado, prioridad=filtros.prioridad, operario_id=filtros.operario_id, q=filtros.q) }}">
+                            <select class="select-estado" name="estado" onchange="this.form.submit()"
+                                    aria-label="Cambiar estado de {{ tarea.titulo }}">
+                                {% for estado in ESTADOS %}
+                                <option value="{{ estado }}" {{ 'selected' if tarea.estado == estado }}>{{ estado }}</option>
+                                {% endfor %}
+                            </select>
+                        </form>
+                    </td>
+
+                    <td class="num">
+                        {% if tarea.fecha_limite %}
+                            {{ tarea.fecha_limite|fecha_es }}
+                            {% if tarea.vencida %}
+                            <span class="celda-sub" style="color:var(--estado-incompleta)">
+                                <i class="fa-solid fa-triangle-exclamation"></i> Vencida
+                            </span>
+                            {% endif %}
+                        {% else %}
+                            <span class="celda-sub">Sin fecha</span>
+                        {% endif %}
+                    </td>
+
+                    {% if puede_gestionar %}
+                    <td>
+                        <div class="fila-acciones">
+                            <button class="accion" type="button" title="Editar tarea"
+                                    data-tarea-editar='{{ {
+                                        "id": tarea.id,
+                                        "accion": url_for("editar_tarea", tarea_id=tarea.id),
+                                        "titulo": tarea.titulo,
+                                        "descripcion": tarea.descripcion or "",
+                                        "operario_id": tarea.operario_id if tarea.operario_id else "",
+                                        "lote": tarea.lote or "",
+                                        "cultivo": tarea.cultivo or "",
+                                        "prioridad": tarea.prioridad,
+                                        "estado": tarea.estado,
+                                        "fecha_inicio": tarea.fecha_inicio.isoformat() if tarea.fecha_inicio else "",
+                                        "fecha_limite": tarea.fecha_limite.isoformat() if tarea.fecha_limite else ""
+                                    } | tojson }}'>
+                                <i class="fa-solid fa-pen"></i>
+                            </button>
+
+                            <form method="POST" action="{{ url_for('eliminar_tarea', tarea_id=tarea.id) }}"
+                                  data-confirmar="¿Eliminar la tarea «{{ tarea.titulo }}»? Esta acción no se puede deshacer.">
+                                <button class="accion accion--peligro" type="submit" title="Eliminar tarea">
+                                    <i class="fa-solid fa-trash"></i>
+                                </button>
+                            </form>
+                        </div>
+                    </td>
+                    {% endif %}
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div class="estado-vacio">
+        <div class="estado-vacio__icono"><i class="fa-solid fa-clipboard-list"></i></div>
+        <h3>No hay tareas registradas</h3>
+        <p>
+            {% if filtros.q or filtros.estado or filtros.prioridad or filtros.operario_id %}
+                Ningún registro coincide con los filtros seleccionados. Ajusta los criterios e inténtalo de nuevo.
+            {% else %}
+                Todavía no se han asignado labores de campo. Crea la primera tarea para comenzar el seguimiento.
+            {% endif %}
+        </p>
+        {% if puede_gestionar %}
+        <button class="btn btn--primary" type="button" data-tarea-nueva>
+            <i class="fa-solid fa-plus"></i> Crear tarea
+        </button>
+        {% endif %}
+    </div>
+    {% endif %}
+
+    {% if tareas %}
+    <div class="card__footer">
+        <span class="form-hint">
+            Mostrando <strong>{{ total_filtrado }}</strong>
+            {{ 'tarea' if total_filtrado == 1 else 'tareas' }}
+            {% if filtros.estado %} en estado <strong>{{ filtros.estado }}</strong>{% endif %}.
+        </span>
+    </div>
+    {% endif %}
+</section>
+
+{% if puede_gestionar %}
+<!-- ==================== Modal crear / editar tarea ==================== -->
+<div class="modal" id="modalTarea" role="dialog" aria-modal="true" aria-labelledby="tituloModalTarea">
+    <div class="modal__dialogo">
+        <div class="modal__cabecera">
+            <h3 id="tituloModalTarea"><i class="fa-solid fa-plus"></i> Nueva tarea</h3>
+            <button class="modal__cerrar" type="button" data-modal-cerrar aria-label="Cerrar">
+                <i class="fa-solid fa-xmark"></i>
+            </button>
+        </div>
+
+        <form id="formTarea" method="POST" action="{{ url_for('crear_tarea') }}"
+              data-accion-crear="{{ url_for('crear_tarea') }}">
+            <div class="modal__cuerpo">
+                <div class="form-grid">
+                    <div class="form-group form-group--full">
+                        <label class="form-label" for="ta-titulo">Título de la labor <span class="req">*</span></label>
+                        <input class="form-control" type="text" id="ta-titulo" name="titulo"
+                               placeholder="Ej. Fertilización foliar lote A" maxlength="150" required>
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label" for="ta-operario">Operario asignado</label>
+                        <select class="form-select" id="ta-operario" name="operario_id">
+                            <option value="">Sin asignar</option>
+                            {% for operario in operarios %}
+                            <option value="{{ operario.id }}">{{ operario.nombre }} · {{ operario.cargo }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label" for="ta-prioridad">Prioridad</label>
+                        <select class="form-select" id="ta-prioridad" name="prioridad">
+                            {% for prioridad in PRIORIDADES %}
+                            <option value="{{ prioridad }}">{{ prioridad }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label" for="ta-lote">Lote</label>
+                        <input class="form-control" type="text" id="ta-lote" name="lote"
+                               placeholder="Ej. Lote A-1" maxlength="60">
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label" for="ta-cultivo">Cultivo</label>
+                        <input class="form-control" type="text" id="ta-cultivo" name="cultivo"
+                               placeholder="Ej. Maíz" maxlength="80">
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label" for="ta-estado">Estado</label>
+                        <select class="form-select" id="ta-estado" name="estado">
+                            {% for estado in ESTADOS %}
+                            <option value="{{ estado }}">{{ estado }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label" for="ta-inicio">Fecha de inicio</label>
+                        <input class="form-control" type="date" id="ta-inicio" name="fecha_inicio">
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label" for="ta-limite">Fecha límite</label>
+                        <input class="form-control" type="date" id="ta-limite" name="fecha_limite">
+                    </div>
+
+                    <div class="form-group form-group--full">
+                        <label class="form-label" for="ta-descripcion">Descripción de la labor</label>
+                        <textarea class="form-textarea" id="ta-descripcion" name="descripcion"
+                                  placeholder="Detalla insumos, método de aplicación, herramientas requeridas…"></textarea>
+                    </div>
+                </div>
+            </div>
+
+            <div class="modal__pie">
+                <button class="btn btn--secondary" type="button" data-modal-cerrar>
+                    <i class="fa-solid fa-xmark"></i> Cancelar
+                </button>
+                <button class="btn btn--primary" type="submit">
+                    <i class="fa-solid fa-floppy-disk"></i> Guardar tarea
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endif %}
+
+{% endblock %}

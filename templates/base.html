@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="SGA · Sistema de Gestión Agrícola para la administración de operarios, tareas de campo y reportes de productividad.">
+    <meta name="theme-color" content="#1e5631">
+    <title>{% block titulo %}Panel{% endblock %} · SGA</title>
+
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='88'>🌱</text></svg>">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    {% block estilos %}{% endblock %}
+</head>
+<body>
+<div class="app">
+
+    <!-- ================= Barra lateral ================= -->
+    <aside class="sidebar" id="sidebar">
+        <div class="sidebar__marca">
+            <div class="marca-logo"><i class="fa-solid fa-seedling"></i></div>
+            <div class="marca-texto">
+                <strong>SGA</strong>
+                <span>Gestión Agrícola</span>
+            </div>
+        </div>
+
+        <nav class="sidebar__nav" aria-label="Navegación principal">
+            <p class="nav-titulo">Operación</p>
+
+            <a class="nav-item {{ 'activo' if request.endpoint == 'tareas' }}"
+               href="{{ url_for('tareas') }}">
+                <i class="fa-solid fa-clipboard-list"></i>
+                <span>Tareas de campo</span>
+                {% if conteo is defined and conteo %}
+                    <span class="nav-item__n">{{ conteo['Pendiente'] + conteo['En Proceso'] }}</span>
+                {% endif %}
+            </a>
+
+            {% if current_user.rol in ('admin', 'supervisor') %}
+            <a class="nav-item {{ 'activo' if request.endpoint == 'operarios' }}"
+               href="{{ url_for('operarios') }}">
+                <i class="fa-solid fa-users"></i>
+                <span>Operarios</span>
+                {% if resumen is defined and resumen %}
+                    <span class="nav-item__n">{{ resumen.total }}</span>
+                {% endif %}
+            </a>
+            {% endif %}
+
+            <p class="nav-titulo">Análisis</p>
+
+            {% if current_user.rol in ('admin', 'supervisor') %}
+            <a class="nav-item {{ 'activo' if request.endpoint == 'reportes' }}"
+               href="{{ url_for('reportes') }}">
+                <i class="fa-solid fa-chart-pie"></i>
+                <span>Reportes</span>
+            </a>
+            {% endif %}
+
+            <a class="nav-item {{ 'activo' if request.endpoint == 'index' }}"
+               href="{{ url_for('index') }}">
+                <i class="fa-solid fa-house"></i>
+                <span>Sitio público</span>
+            </a>
+
+            <p class="nav-titulo">Sesión</p>
+            <a class="nav-item" href="{{ url_for('index') }}#modulos">
+                <i class="fa-solid fa-circle-info"></i>
+                <span>Sobre el sistema</span>
+            </a>
+        </nav>
+
+        <div class="sidebar__pie">
+            <div class="usuario-caja">
+                <div class="avatar avatar--cosecha">{{ current_user.nombre|iniciales }}</div>
+                <div class="usuario-caja__meta">
+                    <div class="usuario-caja__nombre">{{ current_user.nombre or 'Invitado' }}</div>
+                    <div class="usuario-caja__rol">{{ current_user.rol or 'sin rol' }}</div>
+                </div>
+            </div>
+            <a class="sidebar__salir" href="{{ url_for('logout') }}">
+                <i class="fa-solid fa-arrow-right-from-bracket"></i> Cerrar sesión
+            </a>
+        </div>
+    </aside>
+
+    <div class="respaldo-lateral" aria-hidden="true"></div>
+
+    <!-- ================= Contenido ================= -->
+    <div class="app__principal">
+
+        <header class="topbar">
+            <div class="topbar__izq">
+                <button class="hamburguesa" id="botonMenu" type="button" aria-label="Abrir menú">
+                    <i class="fa-solid fa-bars"></i>
+                </button>
+                <div>
+                    <h1 class="topbar__titulo">{% block titulo_pagina %}Panel{% endblock %}</h1>
+                    <p class="topbar__sub">{% block subtitulo_pagina %}{% endblock %}</p>
+                </div>
+            </div>
+
+            <div class="topbar__der">
+                <span class="chip chip--fecha">
+                    <i class="fa-regular fa-calendar"></i>{{ ahora|fecha_es }}
+                </span>
+                <span class="chip chip--usuario">
+                    <span class="avatar avatar--sm avatar--cosecha">{{ current_user.nombre|iniciales }}</span>
+                    {{ current_user.nombre or 'Invitado' }}
+                </span>
+            </div>
+        </header>
+
+        <main class="pagina">
+            {% with mensajes = get_flashed_messages(with_categories=true) %}
+                {% if mensajes %}
+                <div class="flash-stack">
+                    {% for categoria, mensaje in mensajes %}
+                    {% set iconos = {
+                        'success': 'fa-circle-check',
+                        'error': 'fa-circle-exclamation',
+                        'warning': 'fa-triangle-exclamation',
+                        'info': 'fa-circle-info'
+                    } %}
+                    <div class="alerta alerta--{{ categoria if categoria in iconos else 'info' }}" role="alert">
+                        <i class="fa-solid {{ iconos.get(categoria, 'fa-circle-info') }}"></i>
+                        <span class="alerta__texto">{{ mensaje }}</span>
+                        <button class="alerta__cerrar" type="button" aria-label="Cerrar aviso">
+                            <i class="fa-solid fa-xmark"></i>
+                        </button>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% endif %}
+            {% endwith %}
+
+            {% block contenido %}{% endblock %}
+        </main>
+
+        <footer class="pie-app">
+            <span>&copy; {{ ahora.year }} <strong>SGA</strong> · Sistema de Gestión Agrícola</span>
+            <span>Proyecto académico · <strong>UNIMINUTO</strong></span>
+        </footer>
+    </div>
+</div>
+
+<script src="{{ url_for('static', filename='js/main.js') }}"></script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

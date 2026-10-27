@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Flask / entorno
+instance/
+.env
+
+# Respaldos de la base de datos (contienen datos reales)
+dump_*.sql
+*.dump.sql
+
+# Editores
+.vscode/
+.idea/
+*.swp

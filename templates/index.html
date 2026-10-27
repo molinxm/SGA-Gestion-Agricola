@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="SGA · Sistema de Gestión Agrícola: administra operarios, tareas de campo y reportes de productividad. Proyecto académico UNIMINUTO.">
+    <meta name="theme-color" content="#1e5631">
+    <title>SGA · Sistema de Gestión Agrícola</title>
+
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='88'>🌱</text></svg>">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body class="landing">
+
+<!-- ==================== Barra de navegación pública ==================== -->
+<header class="barra-publica">
+    <div class="contenedor barra-publica__interior">
+        <a class="logo-publico" href="{{ url_for('index') }}">
+            <div class="marca-logo"><i class="fa-solid fa-seedling"></i></div>
+            <div>
+                <strong>SGA</strong>
+                <span>Sistema de Gestión Agrícola</span>
+            </div>
+        </a>
+
+        <nav class="menu-publico" aria-label="Navegación del sitio">
+            <a href="#modulos">Módulos</a>
+            <a href="#plataforma">Plataforma</a>
+            <a href="#proceso">Cómo funciona</a>
+            <a href="#tecnologia">Tecnología</a>
+        </nav>
+
+        <div class="acciones-publicas">
+            {% if current_user.id %}
+                <a class="btn btn--primary btn--sm" href="{{ url_for('tareas') }}">
+                    <i class="fa-solid fa-gauge-high"></i> Ir al panel
+                </a>
+            {% else %}
+                <a class="btn btn--secondary btn--sm btn--secundario-ocultable" href="#modulos">Explorar</a>
+                <a class="btn btn--primary btn--sm" href="{{ url_for('login') }}">
+                    <i class="fa-solid fa-right-to-bracket"></i> Ingresar
+                </a>
+            {% endif %}
+        </div>
+    </div>
+</header>
+
+<!-- ==================== Hero ==================== -->
+<section class="hero">
+    <img class="hero__fondo"
+         src="https://coresg-normal.trae.ai/api/ide/v1/text_to_image?prompt=aerial%20view%20of%20lush%20green%20terraced%20agricultural%20fields%20at%20golden%20hour%2C%20neat%20rows%20of%20crops%2C%20irrigation%20channels%2C%20cinematic%20landscape%20photography&image_size=landscape_16_9"
+         alt="Vista aérea de campos de cultivo en hileras al amanecer">
+    <div class="hero__velo"></div>
+
+    <div class="contenedor hero__contenido">
+        <span class="etiqueta"><i class="fa-solid fa-wheat-awn"></i> Proyecto académico UNIMINUTO</span>
+
+        <h1 class="hero__titulo">
+            La gestión del campo, <em>ordenada y medible</em> en un solo sistema.
+        </h1>
+
+        <p class="hero__texto">
+            SGA centraliza la administración de operarios agrícolas, la asignación de tareas por lote y cultivo,
+            y la medición de productividad con reportes claros y exportables.
+        </p>
+
+        <div class="hero__acciones">
+            <a class="btn btn--cosecha" href="{{ url_for('login') }}">
+                <i class="fa-solid fa-right-to-bracket"></i> Acceder al sistema
+            </a>
+            <a class="btn btn--claro" href="#modulos">
+                <i class="fa-solid fa-layer-group"></i> Ver los módulos
+            </a>
+        </div>
+
+        <div class="hero__metricas">
+            <div class="hero__metrica">
+                <strong>4</strong>
+                <span>Módulos integrados</span>
+            </div>
+            <div class="hero__metrica">
+                <strong>3</strong>
+                <span>Roles de acceso</span>
+            </div>
+            <div class="hero__metrica">
+                <strong>100%</strong>
+                <span>Responsive</span>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- ==================== Módulos ==================== -->
+<section class="seccion seccion--alt" id="modulos">
+    <div class="contenedor">
+        <div class="seccion__cabeza">
+            <span class="seccion__marca">Módulos principales</span>
+            <h2 class="seccion__titulo">Todo el ciclo productivo en cuatro módulos</h2>
+            <p class="seccion__texto">
+                Cada módulo resuelve una necesidad concreta del trabajo agrícola y se conecta con los demás
+                para mantener la información siempre consistente.
+            </p>
+        </div>
+
+        <div class="rejilla-modulos">
+            {% for modulo in modulos %}
+            <article class="modulo">
+                <div class="modulo__icono"><i class="fa-solid {{ modulo.icono }}"></i></div>
+                <h3>{{ modulo.titulo }}</h3>
+                <p>{{ modulo.texto }}</p>
+                <a class="modulo__enlace" href="{{ url_for(modulo.endpoint) }}">
+                    Explorar módulo <i class="fa-solid fa-arrow-right"></i>
+                </a>
+            </article>
+            {% endfor %}
+        </div>
+    </div>
+</section>
+
+<!-- ==================== Plataforma ==================== -->
+<section class="seccion" id="plataforma">
+    <div class="contenedor">
+        <div class="bloque-doble">
+            <div>
+                <span class="seccion__marca">La plataforma</span>
+                <h2 class="seccion__titulo">Información confiable para decidir mejor</h2>
+                <p class="seccion__texto">
+                    SGA reemplaza los cuadernos y las hojas de cálculo dispersas por una base de datos
+                    relacional que garantiza integridad y trazabilidad de cada labor realizada en el campo.
+                </p>
+
+                <ul class="lista-check">
+                    <li><i class="fa-solid fa-check"></i> <span><strong>Tareas con ciclo de vida completo:</strong> Pendiente, En Proceso, Completada e Incompleta.</span></li>
+                    <li><i class="fa-solid fa-check"></i> <span><strong>Asignación por lote y cultivo</strong> con prioridad y fecha límite.</span></li>
+                    <li><i class="fa-solid fa-check"></i> <span><strong>Alertas visuales de vencimiento</strong> para las labores fuera de plazo.</span></li>
+                    <li><i class="fa-solid fa-check"></i> <span><strong>Indicadores de cumplimiento</strong> y exportación de reportes en CSV.</span></li>
+                    <li><i class="fa-solid fa-check"></i> <span><strong>Control de acceso por roles:</strong> administrador, supervisor y operario.</span></li>
+                </ul>
+
+                <a class="btn btn--primary" href="{{ url_for('login') }}">
+                    <i class="fa-solid fa-arrow-right-to-bracket"></i> Probar el sistema
+                </a>
+            </div>
+
+            <div class="bloque-doble__media">
+                <img src="https://coresg-normal.trae.ai/api/ide/v1/text_to_image?prompt=two%20farmers%20with%20tablet%20reviewing%20crop%20data%20in%20a%20green%20vegetable%20field%2C%20modern%20agritech%2C%20natural%20daylight%2C%20documentary%20photography&image_size=landscape_4_3"
+                     alt="Agricultores revisando datos de cultivo en una tablet">
+                <div class="bloque-doble__insignia">
+                    <i class="fa-solid fa-chart-simple"></i>
+                    <div>
+                        <strong>Reportes al instante</strong>
+                        <span>Cumplimiento y productividad</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- ==================== Proceso ==================== -->
+<section class="seccion seccion--verde" id="proceso">
+    <div class="contenedor">
+        <div class="seccion__cabeza">
+            <span class="seccion__marca">Cómo funciona</span>
+            <h2 class="seccion__titulo">Cuatro pasos para tomar el control</h2>
+            <p class="seccion__texto">Un flujo simple que cualquier equipo de campo puede adoptar desde el primer día.</p>
+        </div>
+
+        <div class="tarjetas-pasos">
+            <article class="paso">
+                <div class="paso__num">1</div>
+                <h3>Registra a tu equipo</h3>
+                <p>Da de alta a los operarios con su documento, cargo y fecha de ingreso al predio.</p>
+            </article>
+            <article class="paso">
+                <div class="paso__num">2</div>
+                <h3>Asigna las labores</h3>
+                <p>Crea tareas indicando lote, cultivo, prioridad y fecha límite de ejecución.</p>
+            </article>
+            <article class="paso">
+                <div class="paso__num">3</div>
+                <h3>Sigue el avance</h3>
+                <p>Actualiza el estado de cada labor y detecta a tiempo las tareas vencidas.</p>
+            </article>
+            <article class="paso">
+                <div class="paso__num">4</div>
+                <h3>Mide y decide</h3>
+                <p>Consulta el panel de reportes y exporta la información para tu análisis.</p>
+            </article>
+        </div>
+    </div>
+</section>
+
+<!-- ==================== Tecnología ==================== -->
+<section class="seccion" id="tecnologia">
+    <div class="contenedor">
+        <div class="seccion__cabeza">
+            <span class="seccion__marca">Tecnología</span>
+            <h2 class="seccion__titulo">Construido con herramientas estándar de la industria</h2>
+            <p class="seccion__texto">Stack ligero, portable y fácil de mantener por cualquier equipo de desarrollo.</p>
+        </div>
+
+        <div class="tarjetas-tec">
+            <span class="tec"><i class="fa-brands fa-python"></i> Python &amp; Flask</span>
+            <span class="tec"><i class="fa-solid fa-database"></i> MySQL</span>
+            <span class="tec"><i class="fa-brands fa-html5"></i> HTML5 semántico</span>
+            <span class="tec"><i class="fa-brands fa-css3-alt"></i> CSS3 Grid &amp; Flexbox</span>
+            <span class="tec"><i class="fa-solid fa-code"></i> Jinja2</span>
+            <span class="tec"><i class="fa-solid fa-file-csv"></i> Reportes CSV</span>
+            <span class="tec"><i class="fa-solid fa-mobile-screen"></i> Diseño responsive</span>
+            <span class="tec"><i class="fa-solid fa-user-shield"></i> RBAC</span>
+        </div>
+    </div>
+</section>
+
+<!-- ==================== Llamado final ==================== -->
+<section class="seccion seccion--alt">
+    <div class="contenedor">
+        <div class="banda-cta">
+            <h2>¿Listo para ordenar la operación de tu predio?</h2>
+            <p>Ingresa con tu cuenta institucional y empieza a gestionar operarios y tareas en minutos.</p>
+            <div class="banda-cta__acciones">
+                <a class="btn btn--cosecha" href="{{ url_for('login') }}">
+                    <i class="fa-solid fa-right-to-bracket"></i> Iniciar sesión
+                </a>
+                <a class="btn btn--claro" href="#modulos">
+                    <i class="fa-solid fa-book-open"></i> Documentación de módulos
+                </a>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- ==================== Pie público ==================== -->
+<footer class="pie-publico">
+    <div class="contenedor">
+        <div class="pie-publico__rejilla">
+            <div>
+                <div class="logo-publico" style="margin-bottom:1rem">
+                    <div class="marca-logo"><i class="fa-solid fa-seedling"></i></div>
+                    <div>
+                        <strong>SGA</strong>
+                        <span>Sistema de Gestión Agrícola</span>
+                    </div>
+                </div>
+                <p>
+                    Plataforma web para la administración de operarios agrícolas, seguimiento de labores
+                    de campo y análisis de productividad por cultivo.
+                </p>
+            </div>
+
+            <div>
+                <h4>Módulos</h4>
+                <ul>
+                    <li><a href="{{ url_for('tareas') }}">Tareas de campo</a></li>
+                    <li><a href="{{ url_for('operarios') }}">Operarios</a></li>
+                    <li><a href="{{ url_for('reportes') }}">Reportes</a></li>
+                    <li><a href="{{ url_for('login') }}">Acceso al sistema</a></li>
+                </ul>
+            </div>
+
+            <div>
+                <h4>Recursos</h4>
+                <ul>
+                    <li><a href="#plataforma">Características</a></li>
+                    <li><a href="#proceso">Flujo de trabajo</a></li>
+                    <li><a href="#tecnologia">Tecnología</a></li>
+                    <li><a href="#modulos">Módulos principales</a></li>
+                </ul>
+            </div>
+
+            <div>
+                <h4>Créditos académicos</h4>
+                <div class="creditos-uniminuto">
+                    <i class="fa-solid fa-graduation-cap"></i>
+                    <div>
+                        <strong>UNIMINUTO</strong>
+                        <span>Corporación Universitaria Minuto de Dios</span>
+                    </div>
+                </div>
+                <p style="margin-top:.9rem">
+                    Proyecto académico de desarrollo de software · Ingeniería de Software · 2026
+                </p>
+            </div>
+        </div>
+
+        <div class="pie-publico__final">
+            <span>&copy; {{ ahora.year }} SGA · Desarrollado para la <strong>UNIMINUTO</strong>. Todos los derechos reservados.</span>
+            <div class="iconos-sociales">
+                <a href="#" aria-label="GitHub"><i class="fa-brands fa-github"></i></a>
+                <a href="#" aria-label="Correo institucional"><i class="fa-solid fa-envelope"></i></a>
+                <a href="#" aria-label="Documentación"><i class="fa-solid fa-book"></i></a>
+            </div>
+        </div>
+    </div>
+</footer>
+
+<script src="{{ url_for('static', filename='js/main.js') }}"></script>
+</body>
+</html>
