@@ -41,6 +41,7 @@ Puesta en marcha
 import csv
 import io
 import os
+import sqlite3
 from datetime import date, datetime
 from functools import wraps
 
@@ -66,6 +67,10 @@ from werkzeug.security import check_password_hash, generate_password_hash
 
 # Carga las variables del archivo .env (si existe) en os.environ.
 load_dotenv()
+
+# Tipo de base de datos: 'mysql' (defecto) o 'sqlite' (para hosting gratuito)
+DB_TYPE = os.environ.get("SGA_DB_TYPE", "mysql").lower()
+DB_SQLITE_PATH = os.environ.get("SGA_SQLITE_PATH", "sga_agricola.db")
 
 app = Flask(__name__)
 app.config.update(
@@ -158,9 +163,17 @@ MODULOS = [
 # ---------------------------------------------------------------------------
 
 def get_db():
-    """Devuelve una conexión MySQL reutilizada durante el ciclo de la petición."""
+    """Devuelve una conexión MySQL o SQLite según la configuración."""
     if "db" not in g:
-        g.db = mysql.connector.connect(**DB_CONFIG)
+        if DB_TYPE == "sqlite":
+            # Conexión SQLite (servidor gratuito)
+            g.db = sqlite3.connect(DB_SQLITE_PATH)
+            g.db.row_factory = sqlite3.Row
+            # Habilitar claves foráneas en SQLite
+            g.db.execute("PRAGMA foreign_keys = ON")
+        else:
+            # Conexión MySQL (local o servidor pago)
+            g.db = mysql.connector.connect(**DB_CONFIG)
     return g.db
 
 
@@ -169,48 +182,83 @@ def close_db(exception=None):
     db = g.pop("db", None)
     if db is not None:
         try:
-            if db.is_connected():
+            if DB_TYPE == "mysql" and hasattr(db, "is_connected") and db.is_connected():
                 db.close()
-        except Error:
+            else:
+                db.close()
+        except Exception:
             pass
 
 
+def _prepare_sql(sql):
+    """Traduce sintaxis MySQL a SQLite si es necesario."""
+    if DB_TYPE != "sqlite":
+        return sql
+
+    # 1. Marcadores de posición: %s -> ?
+    sql = sql.replace("%s", "?")
+
+    # 2. Ordenamiento personalizado: FIELD() -> CASE
+    field_match = "FIELD(t.estado_tarea, 'EN PROCESO', 'PENDIENTE', 'INCOMPLETA', 'COMPLETADA')"
+    sqlite_case = ("CASE t.estado_tarea WHEN 'EN PROCESO' THEN 1 "
+                   "WHEN 'PENDIENTE' THEN 2 WHEN 'INCOMPLETA' THEN 3 "
+                   "WHEN 'COMPLETADA' THEN 4 ELSE 5 END")
+    sql = sql.replace(field_match, sqlite_case)
+
+    # 3. Formato de fecha: DATE_FORMAT -> strftime
+    # MySQL: DATE_FORMAT(fecha, '%Y-%m') -> SQLite: strftime('%Y-%m', fecha)
+    sql = sql.replace("DATE_FORMAT(fecha_inicio, '%%Y-%%m')", "strftime('%Y-%m', fecha_inicio)")
+    
+    return sql
+
+
 def fetch_all(sql, params=None):
-    cursor = get_db().cursor(dictionary=True)
-    try:
+    db = get_db()
+    sql = _prepare_sql(sql)
+    if DB_TYPE == "sqlite":
+        cursor = db.cursor()
+        cursor.execute(sql, params or ())
+        return [dict(row) for row in cursor.fetchall()]
+    else:
+        cursor = db.cursor(dictionary=True)
         cursor.execute(sql, params or ())
         return cursor.fetchall()
-    finally:
-        cursor.close()
 
 
 def fetch_one(sql, params=None):
-    cursor = get_db().cursor(dictionary=True)
-    try:
+    db = get_db()
+    sql = _prepare_sql(sql)
+    if DB_TYPE == "sqlite":
+        cursor = db.cursor()
+        cursor.execute(sql, params or ())
+        row = cursor.fetchone()
+        return dict(row) if row else None
+    else:
+        cursor = db.cursor(dictionary=True)
         cursor.execute(sql, params or ())
         return cursor.fetchone()
-    finally:
-        cursor.close()
 
 
 def execute(sql, params=None):
     db = get_db()
+    sql = _prepare_sql(sql)
     cursor = db.cursor()
     try:
         cursor.execute(sql, params or ())
         db.commit()
         return cursor.lastrowid
-    except Error:
-        db.rollback()
+    except Exception:
+        if DB_TYPE == "mysql":
+            db.rollback()
         raise
     finally:
         cursor.close()
 
 
 def db_error_message(error):
+    motor = "SQLite" if DB_TYPE == "sqlite" else "MySQL"
     return (
-        "No fue posible conectar con MySQL. Revisa la configuración "
-        "(SGA_DB_HOST / SGA_DB_USER / SGA_DB_PASSWORD / SGA_DB_NAME). "
+        f"No fue posible conectar con {motor}. Revisa la configuración. "
         f"Detalle: {error}"
     )
 
@@ -1048,20 +1096,31 @@ COLUMNAS_EXTRA_TAREAS = {
 
 
 def _existe_tabla(cursor, tabla):
-    cursor.execute(
-        "SELECT COUNT(*) FROM information_schema.TABLES "
-        "WHERE TABLE_SCHEMA = %s AND TABLE_NAME = %s",
-        (DB_CONFIG["database"], tabla),
-    )
+    if DB_TYPE == "sqlite":
+        cursor.execute(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?",
+            (tabla,),
+        )
+    else:
+        cursor.execute(
+            "SELECT COUNT(*) FROM information_schema.TABLES "
+            "WHERE TABLE_SCHEMA = %s AND TABLE_NAME = %s",
+            (DB_CONFIG["database"], tabla),
+        )
     return cursor.fetchone()[0] > 0
 
 
 def _existe_columna(cursor, tabla, columna):
-    cursor.execute(
-        "SELECT COUNT(*) FROM information_schema.COLUMNS "
-        "WHERE TABLE_SCHEMA = %s AND TABLE_NAME = %s AND COLUMN_NAME = %s",
-        (DB_CONFIG["database"], tabla, columna),
-    )
+    if DB_TYPE == "sqlite":
+        cursor.execute(f"PRAGMA table_info({tabla})")
+        columnas = [fila[1] for fila in cursor.fetchall()]
+        return columna in columnas
+    else:
+        cursor.execute(
+            "SELECT COUNT(*) FROM information_schema.COLUMNS "
+            "WHERE TABLE_SCHEMA = %s AND TABLE_NAME = %s AND COLUMN_NAME = %s",
+            (DB_CONFIG["database"], tabla, columna),
+        )
     return cursor.fetchone()[0] > 0
 
 
@@ -1069,7 +1128,14 @@ def _agregar_columnas_faltantes(cursor, tabla, columnas):
     agregadas = []
     for columna, definicion in columnas.items():
         if not _existe_columna(cursor, tabla, columna):
-            cursor.execute(f"ALTER TABLE {tabla} ADD COLUMN {columna} {definicion}")
+            # SQLite no soporta todas las definiciones de MySQL en ALTER TABLE
+            # pero para lo que usamos (VARCHAR/TEXT/DATE NULL) funciona.
+            # Sin embargo, simplificamos la definición para SQLite si hace falta.
+            def_sql = definicion
+            if DB_TYPE == "sqlite":
+                def_sql = definicion.replace("AUTO_INCREMENT", "").replace("ENUM", "TEXT")
+            
+            cursor.execute(f"ALTER TABLE {tabla} ADD COLUMN {columna} {def_sql}")
             agregadas.append(columna)
     return agregadas
 
@@ -1091,25 +1157,36 @@ def _renombrar_pk_tareas(cursor):
 @app.cli.command("init-db")
 def init_db_command():
     """Crea o actualiza el esquema de gestion_agricola y los usuarios semilla."""
-    ruta = os.path.join(os.path.dirname(os.path.abspath(__file__)), "schema.sql")
+    archivo_esquema = "schema_sqlite.sql" if DB_TYPE == "sqlite" else "schema.sql"
+    ruta = os.path.join(os.path.dirname(os.path.abspath(__file__)), archivo_esquema)
+    
     with open(ruta, "r", encoding="utf-8") as archivo:
         sentencias = [s.strip() for s in archivo.read().split(";") if s.strip()]
 
     try:
-        conexion = mysql.connector.connect(
-            host=DB_CONFIG["host"], port=DB_CONFIG["port"], user=DB_CONFIG["user"],
-            password=DB_CONFIG["password"], charset="utf8mb4",
-        )
+        if DB_TYPE == "sqlite":
+            conexion = sqlite3.connect(DB_SQLITE_PATH)
+            print(f"Base de datos SQLite verificada en: {DB_SQLITE_PATH}")
+        else:
+            conexion = mysql.connector.connect(
+                host=DB_CONFIG["host"], port=DB_CONFIG["port"], user=DB_CONFIG["user"],
+                password=DB_CONFIG["password"], charset="utf8mb4",
+            )
+            print(f"Base de datos MySQL «{DB_CONFIG['database']}» verificada.")
+
         cursor = conexion.cursor()
 
-        # 1) Crea la base de datos y las tablas que falten
+        # 1) Crea la base de datos (solo MySQL) y las tablas que falten
         for sentencia in sentencias:
+            if DB_TYPE == "sqlite" and ("CREATE DATABASE" in sentencia or "USE " in sentencia):
+                continue
             cursor.execute(sentencia)
         conexion.commit()
-        print(f"Base de datos «{DB_CONFIG['database']}» verificada.")
 
         # 2) Agrega las columnas que la interfaz necesita y aún no existen
-        cursor.execute(f"USE {DB_CONFIG['database']}")
+        if DB_TYPE == "mysql":
+            cursor.execute(f"USE {DB_CONFIG['database']}")
+        
         nuevas = _agregar_columnas_faltantes(cursor, TABLA_TRABAJADORES, COLUMNAS_EXTRA_TRABAJADORES)
         if nuevas:
             print(f"  {TABLA_TRABAJADORES}: columnas agregadas -> {', '.join(nuevas)}")
@@ -1118,13 +1195,14 @@ def init_db_command():
         if nuevas:
             print(f"  {TABLA_TAREAS}: columnas agregadas -> {', '.join(nuevas)}")
 
-        renombrada = _renombrar_pk_tareas(cursor)
-        if renombrada:
-            print(f"  {TABLA_TAREAS}: llave primaria «{renombrada}» renombrada a «id_tarea»")
+        if DB_TYPE == "mysql":
+            renombrada = _renombrar_pk_tareas(cursor)
+            if renombrada:
+                print(f"  {TABLA_TAREAS}: llave primaria «{renombrada}» renombrada a «id_tarea»")
+        
         conexion.commit()
 
         # 3) Usuarios semilla (solo si la tabla está vacía)
-        # Las contraseñas NO están en el código: se leen del entorno (.env).
         cursor.execute(f"SELECT COUNT(*) FROM {TABLA_USUARIOS}")
         if cursor.fetchone()[0] == 0:
             cursor.execute(f"SELECT id_trabajador FROM {TABLA_TRABAJADORES} ORDER BY id_trabajador LIMIT 1")
@@ -1137,6 +1215,7 @@ def init_db_command():
                 ("Operario de Campo", "operario@sga.edu.co", "SGA_OPERARIO_PASSWORD", "operario", primer_operario),
             ]
             creadas = 0
+            placeholder = "?" if DB_TYPE == "sqlite" else "%s"
             for nombre, email, variable, rol, operario_id in semilla:
                 clave = os.environ.get(variable)
                 if not clave:
@@ -1144,7 +1223,7 @@ def init_db_command():
                     continue
                 cursor.execute(
                     f"INSERT INTO {TABLA_USUARIOS} (nombre, email, password_hash, rol, operario_id) "
-                    f"VALUES (%s, %s, %s, %s, %s)",
+                    f"VALUES ({placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder})",
                     (nombre, email, generate_password_hash(clave), rol, operario_id),
                 )
                 creadas += 1
@@ -1168,10 +1247,11 @@ def init_db_command():
                 ("Diana Ospina Herrera", "1060123456", "3105550106", "diana.ospina@sga.co",
                  "Almacén", "Activo", "2022-01-10", "Control de insumos"),
             ]
+            placeholder = "?" if DB_TYPE == "sqlite" else "%s"
             for fila in ejemplo_trabajadores:
                 cursor.execute(
                     f"INSERT INTO {TABLA_TRABAJADORES} (nombre, documento, telefono, email, "
-                    f"cargo, estado, fecha_ingreso, observaciones) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
+                    f"cargo, estado, fecha_ingreso, observaciones) VALUES ({placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder})",
                     fila,
                 )
             conexion.commit()
@@ -1197,11 +1277,12 @@ def init_db_command():
                 ("Poda de formación frutales", "Poda sanitaria y direccionamiento.", "Lote D-1", "Mango", "Media", "EN PROCESO", "2026-10-18", "2026-10-29", None, operario(3)),
                 ("Capacitación BPA al personal", "Taller de buenas prácticas agrícolas.", "Sala", "N/A", "Baja", "COMPLETADA", "2026-10-11", "2026-10-11", "2026-10-11", operario(4)),
             ]
+            placeholder = "?" if DB_TYPE == "sqlite" else "%s"
             for fila in ejemplo_tareas:
                 cursor.execute(
                     f"INSERT INTO {TABLA_TAREAS} (titulo, descripcion, lote, cultivo, prioridad, "
                     f"estado_tarea, fecha_inicio, fecha_limite, fecha_completada, id_trabajador) "
-                    f"VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                    f"VALUES ({placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder})",
                     fila,
                 )
             conexion.commit()
@@ -1211,7 +1292,7 @@ def init_db_command():
         conexion.close()
 
         print("\nEsquema listo. Las contraseñas de las cuentas semilla se toman de tu entorno (.env).")
-    except Error as error:
+    except Exception as error:
         print(f"Error al inicializar la base de datos: {error}")
 
 
