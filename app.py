@@ -548,11 +548,16 @@ def tareas():
 
     hoy = date.today()
     for tarea in lista_tareas:
+        # En SQLite las fechas vienen como string; las convertimos para comparar
+        f_limite = tarea.get("fecha_limite")
+        if isinstance(f_limite, str):
+            f_limite = parse_date(f_limite)
+
         # Se traduce el estado de MySQL ('EN PROCESO') a la forma de la interfaz ('En Proceso')
         tarea["estado"] = estado_a_interfaz(tarea["estado"])
         tarea["vencida"] = bool(
-            tarea["fecha_limite"]
-            and tarea["fecha_limite"] < hoy
+            f_limite
+            and f_limite < hoy
             and tarea["estado"] not in ("Completada", "Incompleta")
         )
 
