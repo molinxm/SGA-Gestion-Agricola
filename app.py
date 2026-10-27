@@ -548,13 +548,16 @@ def tareas():
 
     hoy = date.today()
     for tarea in lista_tareas:
-        # En SQLite las fechas vienen como string; las convertimos para comparar
-        f_limite = tarea.get("fecha_limite")
-        if isinstance(f_limite, str):
-            f_limite = parse_date(f_limite)
+        # Normalizamos todas las fechas para que Jinja2 no falle al usar .isoformat()
+        for campo in ("fecha_inicio", "fecha_limite", "fecha_completada"):
+            valor = tarea.get(campo)
+            if isinstance(valor, str):
+                tarea[campo] = parse_date(valor)
 
         # Se traduce el estado de MySQL ('EN PROCESO') a la forma de la interfaz ('En Proceso')
         tarea["estado"] = estado_a_interfaz(tarea["estado"])
+        
+        f_limite = tarea.get("fecha_limite")
         tarea["vencida"] = bool(
             f_limite
             and f_limite < hoy
@@ -768,7 +771,11 @@ def operarios():
 
     try:
         lista_operarios = fetch_all(sql, params)
-    except Error as error:
+        # Normalizar fechas en operarios
+        for op in lista_operarios:
+            if isinstance(op.get("fecha_ingreso"), str):
+                op["fecha_ingreso"] = parse_date(op["fecha_ingreso"])
+    except Exception as error:
         flash(db_error_message(error), "error")
         lista_operarios = []
 
