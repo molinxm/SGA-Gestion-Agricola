@@ -1,0 +1,362 @@
+{% extends "base.html" %}
+
+{% block titulo %}Usuarios{% endblock %}
+{% block titulo_pagina %}Gestión de usuarios{% endblock %}
+{% block subtitulo_pagina %}Crea y administra las cuentas de acceso, sus roles y su estatus en el sistema.{% endblock %}
+
+{% block contenido %}
+
+{% set rol_badge = {
+    'admin': 'badge--solido',
+    'supervisor': 'badge--proceso',
+    'operario': 'badge--neutral'
+} %}
+
+<!-- ==================== Indicadores ==================== -->
+<section class="stat-grid">
+    <article class="stat-card stat-card--total">
+        <div class="stat-card__icono"><i class="fa-solid fa-users-gear"></i></div>
+        <div>
+            <div class="stat-card__valor">{{ resumen.total }}</div>
+            <div class="stat-card__label">Cuentas</div>
+        </div>
+    </article>
+
+    <article class="stat-card stat-card--completada">
+        <div class="stat-card__icono"><i class="fa-solid fa-user-check"></i></div>
+        <div>
+            <div class="stat-card__valor">{{ resumen.activos }}</div>
+            <div class="stat-card__label">Activas</div>
+        </div>
+    </article>
+
+    <article class="stat-card stat-card--incompleta">
+        <div class="stat-card__icono"><i class="fa-solid fa-user-slash"></i></div>
+        <div>
+            <div class="stat-card__valor">{{ resumen.inactivos }}</div>
+            <div class="stat-card__label">Inactivas</div>
+        </div>
+    </article>
+
+    <article class="stat-card stat-card--proceso">
+        <div class="stat-card__icono"><i class="fa-solid fa-user-shield"></i></div>
+        <div>
+            <div class="stat-card__valor">{{ resumen.administradores }}</div>
+            <div class="stat-card__label">Administradores</div>
+        </div>
+    </article>
+</section>
+
+<!-- ==================== Listado ==================== -->
+<section class="card">
+    <div class="toolbar">
+        <form class="toolbar__filtros" method="GET" action="{{ url_for('usuarios') }}" data-autofiltro>
+            <span class="buscar">
+                <i class="fa-solid fa-magnifying-glass"></i>
+                <input class="form-control" type="search" name="q" value="{{ filtros.q }}"
+                       placeholder="Buscar por nombre o correo…">
+            </span>
+
+            <select class="form-select" name="rol" aria-label="Filtrar por rol">
+                <option value="">Todos los roles</option>
+                {% for r in ROLES %}
+                <option value="{{ r }}" {{ 'selected' if filtros.rol == r }}>{{ ROLES_ETIQUETA[r] }}</option>
+                {% endfor %}
+            </select>
+
+            <select class="form-select" name="estado" aria-label="Filtrar por estatus">
+                <option value="">Todos los estatus</option>
+                {% for estado in ESTADOS_USUARIO %}
+                <option value="{{ estado }}" {{ 'selected' if filtros.estado == estado }}>{{ estado }}</option>
+                {% endfor %}
+            </select>
+
+            <button class="btn btn--secondary btn--sm" type="submit">
+                <i class="fa-solid fa-filter"></i> Aplicar
+            </button>
+            {% if filtros.q or filtros.rol or filtros.estado %}
+            <a class="btn btn--ghost btn--sm" href="{{ url_for('usuarios') }}">
+                <i class="fa-solid fa-eraser"></i> Limpiar
+            </a>
+            {% endif %}
+        </form>
+
+        <button class="btn btn--primary" type="button" data-usuario-nuevo>
+            <i class="fa-solid fa-user-plus"></i> Nueva cuenta
+        </button>
+    </div>
+
+    {% if usuarios %}
+    <div class="tabla-scroll">
+        <table class="tabla">
+            <thead>
+                <tr>
+                    <th>Cuenta</th>
+                    <th>Rol</th>
+                    <th>Celular</th>
+                    <th>Operario vinculado</th>
+                    <th>Estatus</th>
+                    <th>Alta</th>
+                    <th class="centro">Acciones</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for usuario in usuarios %}
+                <tr>
+                    <td>
+                        <div class="persona">
+                            <span class="avatar">{{ usuario.nombre|iniciales }}</span>
+                            <div>
+                                <span class="celda-titulo">{{ usuario.nombre }}</span>
+                                <span class="celda-sub">
+                                    <i class="fa-solid fa-envelope"></i> {{ usuario.email }}
+                                </span>
+                            </div>
+                        </div>
+                    </td>
+                    <td>
+                        <span class="badge {{ rol_badge.get(usuario.rol, 'badge--neutral') }}">
+                            {{ ROLES_ETIQUETA.get(usuario.rol, usuario.rol) }}
+                        </span>
+                    </td>
+                    <td>
+                        <span class="celda-sub">
+                            <i class="fa-solid fa-mobile-screen"></i> {{ usuario.telefono or 'Sin celular' }}
+                        </span>
+                    </td>
+                    <td>
+                        {% if usuario.operario_nombre %}
+                            <span class="celda-sub">
+                                <i class="fa-solid fa-id-badge"></i> {{ usuario.operario_nombre }}
+                            </span>
+                        {% else %}
+                            <span class="celda-sub">—</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        <span class="badge {{ 'badge--activo' if usuario.activo else 'badge--inactivo' }}">
+                            {{ 'Activo' if usuario.activo else 'Inactivo' }}
+                        </span>
+                    </td>
+                    <td class="num">{{ usuario.creado_en|fecha_es }}</td>
+                    <td>
+                        <div class="fila-acciones">
+                            <button class="accion" type="button" title="Editar cuenta"
+                                    data-usuario-editar='{{ {
+                                        "accion": url_for("editar_usuario", usuario_id=usuario.id),
+                                        "nombre": usuario.nombre,
+                                        "email": usuario.email,
+                                        "telefono": usuario.telefono or "",
+                                        "rol": usuario.rol,
+                                        "activo": "Activo" if usuario.activo else "Inactivo",
+                                        "operario_id": usuario.operario_id or ""
+                                    } | tojson }}'>
+                                <i class="fa-solid fa-pen"></i>
+                            </button>
+
+                            <button class="accion" type="button" title="Restablecer contraseña"
+                                    data-usuario-clave='{{ {
+                                        "accion": url_for("restablecer_clave_usuario", usuario_id=usuario.id),
+                                        "nombre": usuario.nombre
+                                    } | tojson }}'>
+                                <i class="fa-solid fa-key"></i>
+                            </button>
+
+                            {% if usuario.id != current_user.id %}
+                            <form method="POST"
+                                  action="{{ url_for('cambiar_estado_usuario', usuario_id=usuario.id) }}">
+                                <button class="accion {{ 'accion--peligro' if usuario.activo }}"
+                                        type="submit"
+                                        title="{{ 'Desactivar cuenta' if usuario.activo else 'Activar cuenta' }}">
+                                    <i class="fa-solid {{ 'fa-user-slash' if usuario.activo else 'fa-user-check' }}"></i>
+                                </button>
+                            </form>
+
+                            <form method="POST"
+                                  action="{{ url_for('eliminar_usuario', usuario_id=usuario.id) }}"
+                                  data-confirmar="¿Eliminar la cuenta de {{ usuario.nombre }}? Esta acción no se puede deshacer.">
+                                <button class="accion accion--peligro" type="submit" title="Eliminar cuenta">
+                                    <i class="fa-solid fa-trash"></i>
+                                </button>
+                            </form>
+                            {% else %}
+                            <span class="celda-sub" title="Es tu propia cuenta">sesión actual</span>
+                            {% endif %}
+                        </div>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div class="estado-vacio">
+        <div class="estado-vacio__icono"><i class="fa-solid fa-users-slash"></i></div>
+        <h3>No hay cuentas para mostrar</h3>
+        <p>
+            {% if filtros.q or filtros.rol or filtros.estado %}
+                No se encontraron resultados con los filtros aplicados. Prueba con otros criterios.
+            {% else %}
+                Aún no has registrado cuentas de acceso. Comienza creando la primera.
+            {% endif %}
+        </p>
+        <button class="btn btn--primary" type="button" data-usuario-nuevo>
+            <i class="fa-solid fa-user-plus"></i> Crear cuenta
+        </button>
+    </div>
+    {% endif %}
+
+    {% if usuarios %}
+    <div class="card__footer">
+        <span class="form-hint">
+            Mostrando <strong>{{ total_filtrado }}</strong>
+            {{ 'cuenta' if total_filtrado == 1 else 'cuentas' }} de un total de {{ resumen.total }}.
+        </span>
+    </div>
+    {% endif %}
+</section>
+
+<!-- ==================== Modal crear / editar cuenta ==================== -->
+<div class="modal" id="modalUsuario" role="dialog" aria-modal="true" aria-labelledby="tituloModalUsuario">
+    <div class="modal__dialogo">
+        <div class="modal__cabecera">
+            <h3 id="tituloModalUsuario"><i class="fa-solid fa-user-plus"></i> Nueva cuenta</h3>
+            <button class="modal__cerrar" type="button" data-modal-cerrar aria-label="Cerrar">
+                <i class="fa-solid fa-xmark"></i>
+            </button>
+        </div>
+
+        <form id="formUsuario" method="POST" action="{{ url_for('crear_usuario') }}"
+              data-accion-crear="{{ url_for('crear_usuario') }}">
+            <div class="modal__cuerpo">
+                <div class="form-grid">
+                    <div class="form-group form-group--full">
+                        <label class="form-label" for="us-nombre">Nombre completo <span class="req">*</span></label>
+                        <input class="form-control" type="text" id="us-nombre" name="nombre"
+                               placeholder="Ej. Ana Torres Pérez" maxlength="120" required>
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label" for="us-email">Correo institucional <span class="req">*</span></label>
+                        <input class="form-control" type="email" id="us-email" name="email"
+                               placeholder="usuario@sga.edu.co" maxlength="150" required>
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label" for="us-telefono">Celular (opcional)</label>
+                        <input class="form-control" type="tel" id="us-telefono" name="telefono"
+                               placeholder="Ej. 3105550101" maxlength="30">
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label" for="us-rol">Rol <span class="req">*</span></label>
+                        <select class="form-select" id="us-rol" name="rol">
+                            {% for r in ROLES %}
+                            <option value="{{ r }}" {{ 'selected' if r == 'operario' }}>{{ ROLES_ETIQUETA[r] }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label" for="us-activo">Estatus inicial</label>
+                        <select class="form-select" id="us-activo" name="activo">
+                            {% for estado in ESTADOS_USUARIO %}
+                            <option value="{{ estado }}">{{ estado }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+
+                    <div class="form-group form-group--full oculto" id="grupoUsuarioOperario">
+                        <label class="form-label" for="us-operario">Operario vinculado <span class="req">*</span></label>
+                        <select class="form-select" id="us-operario" name="operario_id">
+                            <option value="">— Selecciona un operario de campo —</option>
+                            {% for operario in operarios %}
+                            <option value="{{ operario.id }}">{{ operario.nombre }}{% if operario.cargo %} · {{ operario.cargo }}{% endif %}</option>
+                            {% endfor %}
+                        </select>
+                        <span class="form-hint">Una cuenta con rol Operario debe estar vinculada a su ficha de campo.</span>
+                    </div>
+
+                    <div class="form-group" id="grupoUsuarioClave">
+                        <label class="form-label" for="us-clave">Contraseña <span class="req">*</span></label>
+                        <input class="form-control" type="password" id="us-clave" name="password"
+                               minlength="8" placeholder="Mínimo 8 caracteres" autocomplete="new-password">
+                    </div>
+
+                    <div class="form-group" id="grupoUsuarioClave2">
+                        <label class="form-label" for="us-clave2">Confirmar contraseña <span class="req">*</span></label>
+                        <input class="form-control" type="password" id="us-clave2" name="password2"
+                               minlength="8" placeholder="Repite la contraseña" autocomplete="new-password">
+                    </div>
+
+                    {% if recaptcha_activo %}
+                    <div class="form-group form-group--full oculto" id="grupoUsuarioCaptcha">
+                        <label class="form-label">Verificación de seguridad</label>
+                        <div id="captchaUsuario" class="captcha-usuario" data-sitekey="{{ recaptcha_site_key }}"></div>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+
+            <div class="modal__pie">
+                <button class="btn btn--secondary" type="button" data-modal-cerrar>
+                    <i class="fa-solid fa-xmark"></i> Cancelar
+                </button>
+                <button class="btn btn--primary" type="submit">
+                    <i class="fa-solid fa-floppy-disk"></i> Guardar cuenta
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- ==================== Modal restablecer contraseña ==================== -->
+<div class="modal" id="modalClave" role="dialog" aria-modal="true" aria-labelledby="tituloModalClave">
+    <div class="modal__dialogo">
+        <div class="modal__cabecera">
+            <h3 id="tituloModalClave"><i class="fa-solid fa-key"></i> Restablecer contraseña</h3>
+            <button class="modal__cerrar" type="button" data-modal-cerrar aria-label="Cerrar">
+                <i class="fa-solid fa-xmark"></i>
+            </button>
+        </div>
+
+        <form id="formClave" method="POST" action="">
+            <div class="modal__cuerpo">
+                <p class="form-hint">
+                    Asignarás una nueva contraseña a <strong id="nombreCuentaClave">esta cuenta</strong>.
+                    La contraseña actual no se puede consultar; solo reemplazar.
+                </p>
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label class="form-label" for="cl-clave">Nueva contraseña <span class="req">*</span></label>
+                        <input class="form-control" type="password" id="cl-clave" name="password"
+                               minlength="8" placeholder="Mínimo 8 caracteres" autocomplete="new-password" required>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label" for="cl-clave2">Confirmar contraseña <span class="req">*</span></label>
+                        <input class="form-control" type="password" id="cl-clave2" name="password2"
+                               minlength="8" placeholder="Repite la contraseña" autocomplete="new-password" required>
+                    </div>
+                </div>
+            </div>
+            <div class="modal__pie">
+                <button class="btn btn--secondary" type="button" data-modal-cerrar>
+                    <i class="fa-solid fa-xmark"></i> Cancelar
+                </button>
+                <button class="btn btn--primary" type="submit">
+                    <i class="fa-solid fa-key"></i> Restablecer
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+{% if recaptcha_activo %}
+<script>
+    window.SGA_RECAPTCHA_ACTIVO = true;
+</script>
+{% endif %}
+{% endblock %}

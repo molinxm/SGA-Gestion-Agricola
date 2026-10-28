@@ -113,6 +113,12 @@
                     </div>
                 </div>
 
+                {% if recaptcha_activo %}
+                <div class="form-group">
+                    <div class="g-recaptcha" data-sitekey="{{ recaptcha_site_key }}"></div>
+                </div>
+                {% endif %}
+
                 <div class="caja-acceso__extra">
                     <label class="check-inline">
                         <input type="checkbox" name="recordar"> Mantener sesión activa
@@ -140,6 +146,9 @@
     </section>
 </div>
 
+{% if recaptcha_activo %}
+<script src="https://www.google.com/recaptcha/api.js" async defer></script>
+{% endif %}
 <script src="{{ url_for('static', filename='js/main.js') }}"></script>
 </body>
 </html>

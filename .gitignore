@@ -12,6 +12,8 @@ instance/
 # Respaldos de la base de datos (contienen datos reales)
 dump_*.sql
 *.dump.sql
+*.db
+*.sqlite3
 
 # Editores
 .vscode/

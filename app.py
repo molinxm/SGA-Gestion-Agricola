@@ -30,6 +30,12 @@ Rutas principales
   POST /operarios/<id>/eliminar   Eliminar trabajador
   GET  /reportes                  Panel de indicadores
   GET  /reportes/exportar         Exportación CSV (tareas | operarios)
+  GET  /usuarios                  Panel de usuarios (solo admin)
+  POST /usuarios/crear            Crear cuenta de acceso
+  POST /usuarios/<id>/editar      Editar cuenta
+  POST /usuarios/<id>/estado      Activar / desactivar cuenta
+  POST /usuarios/<id>/clave       Restablecer contraseña
+  POST /usuarios/<id>/eliminar    Eliminar cuenta
 
 Puesta en marcha
 ----------------
@@ -40,10 +46,14 @@ Puesta en marcha
 
 import csv
 import io
+import json
 import os
+import re
 import sqlite3
 from datetime import date, datetime
 from functools import wraps
+from urllib.parse import urlencode
+from urllib.request import Request, urlopen
 
 import mysql.connector
 from dotenv import load_dotenv
@@ -76,6 +86,13 @@ DB_SQLITE_PATH = os.environ.get("SGA_SQLITE_PATH", "sga_agricola.db")
 # distintas, por eso se unifican para que los mensajes de error de la
 # interfaz funcionen igual en local (MySQL) y en el servidor (SQLite).
 DBError = sqlite3.Error if DB_TYPE == "sqlite" else Error
+
+# Verificación anti-robots (Google reCAPTCHA v2).
+# Si no defines las claves en el .env, la verificación se desactiva sola,
+# así el sistema funciona igual en desarrollo y en el servidor.
+RECAPTCHA_SITE_KEY = os.environ.get("SGA_RECAPTCHA_SITE_KEY", "").strip()
+RECAPTCHA_SECRET_KEY = os.environ.get("SGA_RECAPTCHA_SECRET_KEY", "").strip()
+RECAPTCHA_ACTIVO = bool(RECAPTCHA_SITE_KEY and RECAPTCHA_SECRET_KEY)
 
 app = Flask(__name__)
 app.config.update(
@@ -286,11 +303,61 @@ def parse_date(value):
         return None
 
 
+def parse_datetime(value):
+    """Convierte un TIMESTAMP en datetime (SQLite lo entrega como texto)."""
+    if not value:
+        return None
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, date):
+        return datetime(value.year, value.month, value.day)
+    texto = str(value).strip().replace("T", " ")[:19]
+    for formato in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(texto, formato)
+        except ValueError:
+            continue
+    return None
+
+
 def clean(value, max_len=None):
     value = (value or "").strip()
     if max_len:
         value = value[:max_len]
     return value
+
+
+def email_valido(valor):
+    """Validación básica de correo: usuario@dominio.ext"""
+    if not valor or len(valor) > 150:
+        return False
+    return re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]{2,}$", valor) is not None
+
+
+def captcha_valido():
+    """Verifica el reCAPTCHA v2 del formulario enviado.
+
+    Si el sistema no tiene claves configuradas, la verificación no se exige.
+    """
+    if not RECAPTCHA_ACTIVO:
+        return True
+
+    token = request.form.get("g-recaptcha-response", "")
+    if not token:
+        return False
+
+    try:
+        datos = urlencode({
+            "secret": RECAPTCHA_SECRET_KEY,
+            "response": token,
+            "remoteip": request.remote_addr or "",
+        }).encode("utf-8")
+        peticion = Request("https://www.google.com/recaptcha/api/siteverify", data=datos)
+        with urlopen(peticion, timeout=6) as respuesta:
+            return bool(json.loads(respuesta.read().decode("utf-8")).get("success"))
+    except Exception:
+        # Si Google no responde, se niega el acceso por precaución.
+        return False
 
 
 def estado_a_interfaz(valor):
@@ -417,6 +484,10 @@ def inject_globals():
         "CARGOS": CARGOS,
         "ESTADOS_OPERARIO": ESTADOS_OPERARIO,
         "ROLES": ROLES,
+        "ESTADOS_USUARIO": ESTADOS_USUARIO,
+        "ROLES_ETIQUETA": ROLES_ETIQUETA,
+        "recaptcha_site_key": RECAPTCHA_SITE_KEY,
+        "recaptcha_activo": RECAPTCHA_ACTIVO,
         "hoy": date.today(),
         "ahora": datetime.now(),
     }
@@ -448,6 +519,10 @@ def login():
 
         if not email or not password:
             flash("Ingresa tu correo institucional y tu contraseña.", "warning")
+            return render_template("login.html", email=email), 400
+
+        if not captcha_valido():
+            flash("Confirma que no eres un robot para iniciar sesión.", "error")
             return render_template("login.html", email=email), 400
 
         try:
@@ -1097,6 +1172,335 @@ def exportar_reportes():
 
 
 # ---------------------------------------------------------------------------
+#  Módulo: Usuarios  (cuentas de acceso · exclusivo del administrador)
+# ---------------------------------------------------------------------------
+
+# Estatus de una cuenta de acceso
+ESTADOS_USUARIO = ("Activo", "Inactivo")
+
+# Nombre presentable de cada rol
+ROLES_ETIQUETA = {
+    "admin": "Administrador",
+    "supervisor": "Supervisor",
+    "operario": "Operario",
+}
+
+CLAVE_MINIMA = 8
+
+
+def _contar_admins_activos(excluir_id=None):
+    """Cuenta los administradores activos, opcionalmente excluyendo uno."""
+    sql = (
+        f"SELECT COUNT(*) AS total FROM {TABLA_USUARIOS} "
+        f"WHERE rol = 'admin' AND activo = 1"
+    )
+    params = None
+    if excluir_id is not None:
+        sql += " AND id <> %s"
+        params = (excluir_id,)
+    fila = fetch_one(sql, params) or {}
+    return int(fila.get("total") or 0)
+
+
+def _operario_valido(operario_id):
+    """Devuelve el id del trabajador si existe; si no, None."""
+    if not operario_id.isdigit():
+        return None
+    fila = fetch_one(
+        f"SELECT id_trabajador FROM {TABLA_TRABAJADORES} WHERE id_trabajador = %s",
+        (int(operario_id),),
+    )
+    return int(operario_id) if fila else None
+
+
+def _operarios_para_vincular():
+    """Trabajadores de campo disponibles para vincular a una cuenta."""
+    return fetch_all(
+        f"SELECT id_trabajador AS id, nombre, cargo, estado "
+        f"FROM {TABLA_TRABAJADORES} ORDER BY nombre"
+    )
+
+
+@app.route("/usuarios")
+@roles_required()  # solo admin
+def usuarios():
+    busqueda = clean(request.args.get("q"))
+    rol = clean(request.args.get("rol"))
+    estado = clean(request.args.get("estado"))
+
+    sql = f"""
+        SELECT u.id, u.nombre, u.email, u.telefono, u.rol, u.activo,
+               u.operario_id, u.creado_en, w.nombre AS operario_nombre
+        FROM {TABLA_USUARIOS} u
+        LEFT JOIN {TABLA_TRABAJADORES} w ON w.id_trabajador = u.operario_id
+        WHERE 1 = 1
+    """
+    params = []
+    if busqueda:
+        sql += " AND (u.nombre LIKE %s OR u.email LIKE %s)"
+        like = f"%{busqueda}%"
+        params.extend([like, like])
+    if rol in ROLES:
+        sql += " AND u.rol = %s"
+        params.append(rol)
+    if estado in ESTADOS_USUARIO:
+        sql += " AND u.activo = %s"
+        params.append(1 if estado == "Activo" else 0)
+    sql += " ORDER BY u.rol ASC, u.nombre ASC"
+
+    cuentas, operarios_lista = [], []
+    try:
+        cuentas = fetch_all(sql, params)
+        operarios_lista = _operarios_para_vincular()
+        for cuenta in cuentas:
+            cuenta["activo"] = bool(cuenta["activo"])
+            cuenta["creado_en"] = parse_datetime(cuenta["creado_en"])
+    except DBError as error:
+        flash(db_error_message(error), "error")
+
+    resumen = {
+        "total": len(cuentas),
+        "activos": sum(1 for c in cuentas if c["activo"]),
+        "inactivos": sum(1 for c in cuentas if not c["activo"]),
+        "administradores": sum(1 for c in cuentas if c["rol"] == "admin"),
+    }
+
+    return render_template(
+        "usuarios.html",
+        usuarios=cuentas,
+        operarios=operarios_lista,
+        resumen=resumen,
+        filtros={"q": busqueda, "rol": rol, "estado": estado},
+        total_filtrado=len(cuentas),
+    )
+
+
+@app.route("/usuarios/crear", methods=["POST"])
+@roles_required()  # solo admin
+def crear_usuario():
+    nombre = clean(request.form.get("nombre"), 120)
+    email = clean(request.form.get("email"), 150).lower()
+    telefono = clean(request.form.get("telefono"), 30)
+    rol = clean(request.form.get("rol"))
+    clave = request.form.get("password") or ""
+    confirmacion = request.form.get("password2") or ""
+    operario_id = clean(request.form.get("operario_id"))
+
+    if not nombre or not email:
+        flash("El nombre y el correo de la cuenta son obligatorios.", "error")
+        return redirect(url_for("usuarios"))
+    if not email_valido(email):
+        flash("El correo no tiene un formato válido.", "error")
+        return redirect(url_for("usuarios"))
+    if not clave:
+        flash("Debes asignar una contraseña: no se guarda una cuenta sin ella.", "error")
+        return redirect(url_for("usuarios"))
+    if len(clave) < CLAVE_MINIMA:
+        flash(f"La contraseña debe tener al menos {CLAVE_MINIMA} caracteres.", "error")
+        return redirect(url_for("usuarios"))
+    if clave != confirmacion:
+        flash("Las contraseñas no coinciden. Verifica e inténtalo de nuevo.", "error")
+        return redirect(url_for("usuarios"))
+    if not captcha_valido():
+        flash("Confirma que no eres un robot para crear la cuenta.", "error")
+        return redirect(url_for("usuarios"))
+
+    if rol not in ROLES:
+        rol = "operario"
+
+    # Una cuenta de operario debe quedar vinculada a su ficha de campo
+    vinculo = None
+    if rol == "operario":
+        vinculo = _operario_valido(operario_id)
+        if not vinculo:
+            flash("Selecciona el operario de campo que usará esta cuenta.", "error")
+            return redirect(url_for("usuarios"))
+
+    try:
+        if fetch_one(f"SELECT id FROM {TABLA_USUARIOS} WHERE email = %s", (email,)):
+            flash("Ya existe una cuenta registrada con ese correo.", "error")
+            return redirect(url_for("usuarios"))
+
+        execute(
+            f"""
+            INSERT INTO {TABLA_USUARIOS}
+                (nombre, email, password_hash, telefono, rol, activo, operario_id)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
+            """,
+            (
+                nombre,
+                email,
+                generate_password_hash(clave),
+                telefono or None,
+                rol,
+                1 if clean(request.form.get("activo")) == "Activo" else 0,
+                vinculo,
+            ),
+        )
+        flash(f"Cuenta de «{nombre}» creada correctamente.", "success")
+    except DBError as error:
+        flash(db_error_message(error), "error")
+
+    return redirect(url_for("usuarios"))
+
+
+@app.route("/usuarios/<int:usuario_id>/editar", methods=["POST"])
+@roles_required()  # solo admin
+def editar_usuario(usuario_id):
+    cuenta = fetch_one(f"SELECT * FROM {TABLA_USUARIOS} WHERE id = %s", (usuario_id,))
+    if not cuenta:
+        flash("La cuenta que intentas editar no existe.", "error")
+        return redirect(url_for("usuarios"))
+
+    nombre = clean(request.form.get("nombre"), 120)
+    email = clean(request.form.get("email"), 150).lower()
+    telefono = clean(request.form.get("telefono"), 30)
+    rol = clean(request.form.get("rol"))
+    operario_id = clean(request.form.get("operario_id"))
+
+    if not nombre or not email_valido(email):
+        flash("Revisa el nombre y el correo: son obligatorios y el correo debe ser válido.", "error")
+        return redirect(url_for("usuarios"))
+
+    if rol not in ROLES:
+        rol = cuenta["rol"]
+
+    # El sistema nunca debe quedarse sin administradores activos
+    if (cuenta["rol"] == "admin" and rol != "admin" and bool(cuenta["activo"])
+            and _contar_admins_activos(excluir_id=usuario_id) == 0):
+        flash("Debe existir al menos un administrador activo: crea otro antes de cambiar este rol.", "error")
+        return redirect(url_for("usuarios"))
+
+    vinculo = None
+    if rol == "operario":
+        vinculo = _operario_valido(operario_id)
+        if not vinculo:
+            flash("Selecciona el operario de campo que usará esta cuenta.", "error")
+            return redirect(url_for("usuarios"))
+
+    try:
+        repetido = fetch_one(
+            f"SELECT id FROM {TABLA_USUARIOS} WHERE email = %s AND id <> %s",
+            (email, usuario_id),
+        )
+        if repetido:
+            flash("Ese correo ya está en uso por otra cuenta.", "error")
+            return redirect(url_for("usuarios"))
+
+        execute(
+            f"""
+            UPDATE {TABLA_USUARIOS}
+               SET nombre = %s, email = %s, telefono = %s, rol = %s, operario_id = %s
+             WHERE id = %s
+            """,
+            (nombre, email, telefono or None, rol, vinculo, usuario_id),
+        )
+        flash(f"Cuenta de «{nombre}» actualizada correctamente.", "success")
+    except DBError as error:
+        flash(db_error_message(error), "error")
+
+    return redirect(url_for("usuarios"))
+
+
+@app.route("/usuarios/<int:usuario_id>/estado", methods=["POST"])
+@roles_required()  # solo admin
+def cambiar_estado_usuario(usuario_id):
+    cuenta = fetch_one(f"SELECT * FROM {TABLA_USUARIOS} WHERE id = %s", (usuario_id,))
+    if not cuenta:
+        flash("La cuenta indicada no existe.", "error")
+        return redirect(url_for("usuarios"))
+
+    if usuario_id == session.get("user_id"):
+        flash("No puedes desactivar la cuenta con la que estás trabajando.", "error")
+        return redirect(url_for("usuarios"))
+
+    nuevo_estado = 0 if cuenta["activo"] else 1
+
+    if (nuevo_estado == 0 and cuenta["rol"] == "admin"
+            and _contar_admins_activos(excluir_id=usuario_id) == 0):
+        flash("No puedes desactivar al último administrador activo del sistema.", "error")
+        return redirect(url_for("usuarios"))
+
+    try:
+        execute(
+            f"UPDATE {TABLA_USUARIOS} SET activo = %s WHERE id = %s",
+            (nuevo_estado, usuario_id),
+        )
+        flash(
+            f"La cuenta de «{cuenta['nombre']}» quedó "
+            f"{'activa' if nuevo_estado else 'inactiva'}.",
+            "success",
+        )
+    except DBError as error:
+        flash(db_error_message(error), "error")
+
+    return redirect(url_for("usuarios"))
+
+
+@app.route("/usuarios/<int:usuario_id>/clave", methods=["POST"])
+@roles_required()  # solo admin
+def restablecer_clave_usuario(usuario_id):
+    cuenta = fetch_one(f"SELECT * FROM {TABLA_USUARIOS} WHERE id = %s", (usuario_id,))
+    if not cuenta:
+        flash("La cuenta indicada no existe.", "error")
+        return redirect(url_for("usuarios"))
+
+    clave = request.form.get("password") or ""
+    confirmacion = request.form.get("password2") or ""
+
+    if not clave:
+        flash("Escribe la nueva contraseña.", "error")
+        return redirect(url_for("usuarios"))
+    if len(clave) < CLAVE_MINIMA:
+        flash(f"La nueva contraseña debe tener al menos {CLAVE_MINIMA} caracteres.", "error")
+        return redirect(url_for("usuarios"))
+    if clave != confirmacion:
+        flash("Las contraseñas no coinciden.", "error")
+        return redirect(url_for("usuarios"))
+
+    try:
+        execute(
+            f"UPDATE {TABLA_USUARIOS} SET password_hash = %s WHERE id = %s",
+            (generate_password_hash(clave), usuario_id),
+        )
+        flash(
+            f"Contraseña de «{cuenta['nombre']}» restablecida. "
+            f"Ya puede iniciar sesión con la nueva.",
+            "success",
+        )
+    except DBError as error:
+        flash(db_error_message(error), "error")
+
+    return redirect(url_for("usuarios"))
+
+
+@app.route("/usuarios/<int:usuario_id>/eliminar", methods=["POST"])
+@roles_required()  # solo admin
+def eliminar_usuario(usuario_id):
+    cuenta = fetch_one(f"SELECT * FROM {TABLA_USUARIOS} WHERE id = %s", (usuario_id,))
+    if not cuenta:
+        flash("La cuenta indicada no existe.", "error")
+        return redirect(url_for("usuarios"))
+
+    if usuario_id == session.get("user_id"):
+        flash("No puedes eliminar la cuenta con la que estás trabajando.", "error")
+        return redirect(url_for("usuarios"))
+
+    if (cuenta["rol"] == "admin" and bool(cuenta["activo"])
+            and _contar_admins_activos(excluir_id=usuario_id) == 0):
+        flash("No puedes eliminar al último administrador activo del sistema.", "error")
+        return redirect(url_for("usuarios"))
+
+    try:
+        execute(f"DELETE FROM {TABLA_USUARIOS} WHERE id = %s", (usuario_id,))
+        flash(f"La cuenta de «{cuenta['nombre']}» fue eliminada del sistema.", "success")
+    except DBError as error:
+        flash(db_error_message(error), "error")
+
+    return redirect(url_for("usuarios"))
+
+
+# ---------------------------------------------------------------------------
 #  Migración de esquema y datos semilla
 #  (idempotente: se puede ejecutar varias veces sin perder información)
 # ---------------------------------------------------------------------------
@@ -1118,6 +1522,10 @@ COLUMNAS_EXTRA_TAREAS = {
     "fecha_limite": "DATE NULL",
     "fecha_completada": "DATE NULL",
     "observaciones": "VARCHAR(255) NULL",
+}
+
+COLUMNAS_EXTRA_USUARIOS = {
+    "telefono": "VARCHAR(30) NULL",
 }
 
 
@@ -1220,6 +1628,10 @@ def init_db_command():
         nuevas = _agregar_columnas_faltantes(cursor, TABLA_TAREAS, COLUMNAS_EXTRA_TAREAS)
         if nuevas:
             print(f"  {TABLA_TAREAS}: columnas agregadas -> {', '.join(nuevas)}")
+
+        nuevas = _agregar_columnas_faltantes(cursor, TABLA_USUARIOS, COLUMNAS_EXTRA_USUARIOS)
+        if nuevas:
+            print(f"  {TABLA_USUARIOS}: columnas agregadas -> {', '.join(nuevas)}")
 
         if DB_TYPE == "mysql":
             renombrada = _renombrar_pk_tareas(cursor)

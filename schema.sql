@@ -79,6 +79,7 @@ CREATE TABLE IF NOT EXISTS usuarios (
     nombre         VARCHAR(120) NOT NULL,
     email          VARCHAR(150) NOT NULL UNIQUE,
     password_hash  VARCHAR(255) NOT NULL,
+    telefono       VARCHAR(30)           DEFAULT NULL,
     rol            ENUM('admin', 'supervisor', 'operario') NOT NULL DEFAULT 'operario',
     activo         TINYINT(1)   NOT NULL DEFAULT 1,
     operario_id    INT                   DEFAULT NULL,

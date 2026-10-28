@@ -67,6 +67,19 @@
                 <span>Sitio público</span>
             </a>
 
+            {% if current_user.rol == 'admin' %}
+            <p class="nav-titulo">Seguridad</p>
+
+            <a class="nav-item {{ 'activo' if request.endpoint == 'usuarios' }}"
+               href="{{ url_for('usuarios') }}">
+                <i class="fa-solid fa-user-shield"></i>
+                <span>Usuarios</span>
+                {% if resumen is defined and resumen and request.endpoint == 'usuarios' %}
+                    <span class="nav-item__n">{{ resumen.total }}</span>
+                {% endif %}
+            </a>
+            {% endif %}
+
             <p class="nav-titulo">Sesión</p>
             <a class="nav-item" href="{{ url_for('index') }}#modulos">
                 <i class="fa-solid fa-circle-info"></i>

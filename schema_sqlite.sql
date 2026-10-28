@@ -54,6 +54,7 @@ CREATE TABLE IF NOT EXISTS usuarios (
     nombre         TEXT NOT NULL,
     email          TEXT NOT NULL UNIQUE,
     password_hash  TEXT NOT NULL,
+    telefono       TEXT          DEFAULT NULL,
     rol            TEXT NOT NULL DEFAULT 'operario',
     activo         INTEGER NOT NULL DEFAULT 1,
     operario_id    INTEGER          DEFAULT NULL,

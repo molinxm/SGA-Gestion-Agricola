@@ -184,6 +184,138 @@
     }
 
     /* ----------------------------------------------------------------------
+       Modal de usuarios: modo crear / editar
+       ---------------------------------------------------------------------- */
+    const modalUsuario = document.getElementById("modalUsuario");
+    const formUsuario = document.getElementById("formUsuario");
+
+    if (modalUsuario && formUsuario) {
+        const tituloUsuario = document.getElementById("tituloModalUsuario");
+        const accionCrearUs = formUsuario.getAttribute("data-accion-crear");
+        const grupoOperario = document.getElementById("grupoUsuarioOperario");
+        const grupoCaptcha = document.getElementById("grupoUsuarioCaptcha");
+        const selectRol = formUsuario.querySelector('[name="rol"]');
+
+        function ajustarRolUsuario() {
+            const esOperario = selectRol && selectRol.value === "operario";
+            if (grupoOperario) grupoOperario.classList.toggle("oculto", !esOperario);
+        }
+
+        if (selectRol) selectRol.addEventListener("change", ajustarRolUsuario);
+
+        document.querySelectorAll("[data-usuario-nuevo]").forEach((boton) => {
+            boton.addEventListener("click", (e) => {
+                e.preventDefault();
+                formUsuario.reset();
+                formUsuario.setAttribute("action", accionCrearUs);
+                formUsuario.querySelectorAll('[id^="grupoUsuarioClave"]')
+                    .forEach((grupo) => grupo.classList.remove("oculto"));
+                if (grupoCaptcha) grupoCaptcha.classList.remove("oculto");
+                rellenar(formUsuario.querySelector('[name="activo"]'), "Activo");
+                rellenar(selectRol, "operario");
+                ajustarRolUsuario();
+                if (tituloUsuario) {
+                    tituloUsuario.innerHTML = '<i class="fa-solid fa-user-plus"></i> Nueva cuenta';
+                }
+                abrirModal("modalUsuario");
+                asegurarCaptchaUsuario();
+            });
+        });
+
+        document.querySelectorAll("[data-usuario-editar]").forEach((boton) => {
+            boton.addEventListener("click", (e) => {
+                e.preventDefault();
+                let cuenta;
+                try {
+                    cuenta = JSON.parse(boton.getAttribute("data-usuario-editar"));
+                } catch (err) {
+                    return;
+                }
+                formUsuario.reset();
+                formUsuario.setAttribute("action", cuenta.accion);
+                ["nombre", "email", "telefono", "rol", "activo", "operario_id"].forEach((campo) => {
+                    rellenar(formUsuario.querySelector('[name="' + campo + '"]'), cuenta[campo]);
+                });
+                formUsuario.querySelectorAll('[id^="grupoUsuarioClave"]')
+                    .forEach((grupo) => grupo.classList.add("oculto"));
+                if (grupoCaptcha) grupoCaptcha.classList.add("oculto");
+                ajustarRolUsuario();
+                if (tituloUsuario) {
+                    tituloUsuario.innerHTML = '<i class="fa-solid fa-user-pen"></i> Editar cuenta';
+                }
+                abrirModal("modalUsuario");
+            });
+        });
+    }
+
+    /* ----------------------------------------------------------------------
+       Modal de restablecer contraseña
+       ---------------------------------------------------------------------- */
+    const formClave = document.getElementById("formClave");
+
+    if (formClave) {
+        const nombreCuentaClave = document.getElementById("nombreCuentaClave");
+        document.querySelectorAll("[data-usuario-clave]").forEach((boton) => {
+            boton.addEventListener("click", (e) => {
+                e.preventDefault();
+                let datos;
+                try {
+                    datos = JSON.parse(boton.getAttribute("data-usuario-clave"));
+                } catch (err) {
+                    return;
+                }
+                formClave.reset();
+                formClave.setAttribute("action", datos.accion);
+                if (nombreCuentaClave) nombreCuentaClave.textContent = datos.nombre;
+                abrirModal("modalClave");
+            });
+        });
+    }
+
+    /* ----------------------------------------------------------------------
+       reCAPTCHA en el modal de usuarios (carga y render diferidos)
+       ---------------------------------------------------------------------- */
+    let captchaUsuarioListo = false;
+
+    function cargarRecaptcha() {
+        if (window.__sgaRecaptcha) return;
+        window.__sgaRecaptcha = true;
+        const script = document.createElement("script");
+        script.src = "https://www.google.com/recaptcha/api.js?render=explicit";
+        script.async = true;
+        script.defer = true;
+        document.head.appendChild(script);
+    }
+
+    function asegurarCaptchaUsuario() {
+        const contenedor = document.getElementById("captchaUsuario");
+        if (!contenedor) return;
+
+        cargarRecaptcha();
+
+        if (typeof grecaptcha === "undefined" || !grecaptcha.render) {
+            setTimeout(asegurarCaptchaUsuario, 350);
+            return;
+        }
+
+        if (!captchaUsuarioListo) {
+            try {
+                grecaptcha.render(contenedor, {
+                    sitekey: contenedor.getAttribute("data-sitekey"),
+                });
+                captchaUsuarioListo = true;
+            } catch (err) {
+                /* Si aún no está disponible, se reintenta al abrir de nuevo. */
+            }
+            return;
+        }
+
+        if (grecaptcha.reset) {
+            try { grecaptcha.reset(); } catch (err) { /* sin problema */ }
+        }
+    }
+
+    /* ----------------------------------------------------------------------
        Confirmación previa a acciones destructivas
        ---------------------------------------------------------------------- */
     document.querySelectorAll("form[data-confirmar]").forEach((formulario) => {
