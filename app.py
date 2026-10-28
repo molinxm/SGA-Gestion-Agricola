@@ -72,6 +72,11 @@ load_dotenv()
 DB_TYPE = os.environ.get("SGA_DB_TYPE", "mysql").lower()
 DB_SQLITE_PATH = os.environ.get("SGA_SQLITE_PATH", "sga_agricola.db")
 
+# Clase de excepción del motor activo. MySQL y SQLite usan excepciones
+# distintas, por eso se unifican para que los mensajes de error de la
+# interfaz funcionen igual en local (MySQL) y en el servidor (SQLite).
+DBError = sqlite3.Error if DB_TYPE == "sqlite" else Error
+
 app = Flask(__name__)
 app.config.update(
     SECRET_KEY=os.environ.get("SGA_SECRET_KEY", "sga-dev-secret-cambiar-en-produccion"),
@@ -198,14 +203,17 @@ def _prepare_sql(sql):
     # 1. Marcadores de posición: %s -> ?
     sql = sql.replace("%s", "?")
 
-    # 2. Ordenamiento personalizado: FIELD() -> CASE
+    # 2. Igualdad segura ante NULL: MySQL "<=>" no existe en SQLite -> "IS"
+    sql = sql.replace("<=>", "IS")
+
+    # 3. Ordenamiento personalizado: FIELD() -> CASE
     field_match = "FIELD(t.estado_tarea, 'EN PROCESO', 'PENDIENTE', 'INCOMPLETA', 'COMPLETADA')"
     sqlite_case = ("CASE t.estado_tarea WHEN 'EN PROCESO' THEN 1 "
                    "WHEN 'PENDIENTE' THEN 2 WHEN 'INCOMPLETA' THEN 3 "
                    "WHEN 'COMPLETADA' THEN 4 ELSE 5 END")
     sql = sql.replace(field_match, sqlite_case)
 
-    # 3. Formato de fecha: DATE_FORMAT -> strftime
+    # 4. Formato de fecha: DATE_FORMAT -> strftime
     # MySQL: DATE_FORMAT(fecha, '%Y-%m') -> SQLite: strftime('%Y-%m', fecha)
     sql = sql.replace("DATE_FORMAT(fecha_inicio, '%%Y-%%m')", "strftime('%Y-%m', fecha_inicio)")
     
@@ -446,7 +454,7 @@ def login():
             usuario = fetch_one(
                 f"SELECT * FROM {TABLA_USUARIOS} WHERE email = %s", (email,)
             )
-        except Error as error:
+        except DBError as error:
             flash(db_error_message(error), "error")
             return render_template("login.html", email=email), 503
 
@@ -542,7 +550,7 @@ def tareas():
             f"SELECT id_trabajador AS id, nombre, cargo, estado "
             f"FROM {TABLA_TRABAJADORES} ORDER BY nombre"
         )
-    except Error as error:
+    except DBError as error:
         flash(db_error_message(error), "error")
         lista_tareas, operarios_lista = [], []
 
@@ -618,7 +626,7 @@ def crear_tarea():
             ),
         )
         flash(f"Tarea «{titulo}» registrada correctamente.", "success")
-    except Error as error:
+    except DBError as error:
         flash(db_error_message(error), "error")
 
     return redirect(url_for("tareas"))
@@ -672,7 +680,7 @@ def editar_tarea(tarea_id):
             ),
         )
         flash("Tarea actualizada correctamente.", "success")
-    except Error as error:
+    except DBError as error:
         flash(db_error_message(error), "error")
 
     return redirect(url_for("tareas"))
@@ -707,7 +715,7 @@ def cambiar_estado_tarea(tarea_id):
             (estado_a_base(nuevo_estado), fecha_completada, tarea_id),
         )
         flash(f"Estado actualizado a «{nuevo_estado}».", "success")
-    except Error as error:
+    except DBError as error:
         flash(db_error_message(error), "error")
 
     return redirect(request.form.get("volver_a") or url_for("tareas"))
@@ -719,7 +727,7 @@ def eliminar_tarea(tarea_id):
     try:
         execute(f"DELETE FROM {TABLA_TAREAS} WHERE id_tarea = %s", (tarea_id,))
         flash("Tarea eliminada del sistema.", "success")
-    except Error as error:
+    except DBError as error:
         flash(db_error_message(error), "error")
     return redirect(url_for("tareas"))
 
@@ -827,7 +835,7 @@ def crear_operario():
             ),
         )
         flash(f"Operario «{nombre}» registrado correctamente.", "success")
-    except Error as error:
+    except DBError as error:
         flash(db_error_message(error), "error")
 
     return redirect(url_for("operarios"))
@@ -867,7 +875,7 @@ def editar_operario(operario_id):
             ),
         )
         flash("Datos del operario actualizados correctamente.", "success")
-    except Error as error:
+    except DBError as error:
         flash(db_error_message(error), "error")
 
     return redirect(url_for("operarios"))
@@ -879,7 +887,7 @@ def eliminar_operario(operario_id):
     try:
         execute(f"DELETE FROM {TABLA_TRABAJADORES} WHERE id_trabajador = %s", (operario_id,))
         flash("Operario eliminado. Sus tareas quedaron sin asignar.", "success")
-    except Error as error:
+    except DBError as error:
         flash(db_error_message(error), "error")
     return redirect(url_for("operarios"))
 
@@ -952,7 +960,7 @@ def reportes():
             f"SELECT COUNT(*) AS total, COALESCE(SUM(estado = 'Activo'), 0) AS activos "
             f"FROM {TABLA_TRABAJADORES}"
         ) or {}
-    except Error as error:
+    except DBError as error:
         flash(db_error_message(error), "error")
         totales, por_estado, por_prioridad = {}, [], []
         por_cultivo, por_operario, por_periodo, total_operarios = [], [], [], {}
@@ -1009,7 +1017,13 @@ def exportar_reportes():
     writer = csv.writer(buffer, delimiter=";")
 
     def formatear(valor):
-        return valor.strftime("%d/%m/%Y") if valor else ""
+        if not valor:
+            return ""
+        # En SQLite las fechas llegan como texto 'YYYY-MM-DD'; se normalizan.
+        if isinstance(valor, str):
+            valor = parse_date(valor)
+            return valor.strftime("%d/%m/%Y") if valor else ""
+        return valor.strftime("%d/%m/%Y")
 
     try:
         if tipo == "operarios":
@@ -1071,7 +1085,7 @@ def exportar_reportes():
                     formatear(fila["fecha_completada"]), a_tiempo,
                 ])
             nombre_archivo = f"sga_tareas_{marca}.csv"
-    except Error as error:
+    except DBError as error:
         flash(db_error_message(error), "error")
         return redirect(url_for("reportes"))
 
